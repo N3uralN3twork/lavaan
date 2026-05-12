@@ -680,6 +680,8 @@ lav_data_full <- function(data = NULL, # data.frame
       ov_names_x <- list(ov_names_x)
     }
   }
+  ov_names_1 <- unlist(ov_names, use.names = FALSE)
+  ov_names_x_1 <- unlist(ov_names_x, use.names = FALSE)
 
   # check if all ov.names can be found in the data.frame
   for (g in 1:ngroups) {
@@ -727,12 +729,26 @@ lav_data_full <- function(data = NULL, # data.frame
   )
 
   # do some checking
+  complete_single_group_ov_row_idx <- integer(0L)
+  complete_single_group_x <- NULL
+  if (ngroups == 1L && length(group_label) == 0L && nlevels == 1L &&
+      length(cluster) == 0L && length(ov_names_x_1) == 0L &&
+      missing == "listwise" && nrow(data) > 0L) {
+    complete_single_group_ov_row_idx <- match(ov_names[[1L]], ov$name)
+    if (all(ov$nobs[complete_single_group_ov_row_idx] == nrow(data)) &&
+        all(ov$type[complete_single_group_ov_row_idx] == "numeric")) {
+      complete_single_group_x <-
+        data.matrix(data[, ov$idx[complete_single_group_ov_row_idx],
+          drop = FALSE])
+    } else {
+      complete_single_group_ov_row_idx <- integer(0L)
+    }
+  }
+
   # check for unordered factors (but only if nlev > 2)
   if ("factor" %in% ov$type) {
     f_names <- ov$name[ov$type == "factor" & ov$nlev > 2L]
     f_names_all <- ov$name[ov$type == "factor"]
-    ov_names_1 <- unlist(ov_names)
-    ov_names_x_1 <- unlist(ov_names_x)
     ov_names_nox <- ov_names_1[!ov_names_1 %in% ov_names_x_1]
     if (any(f_names %in% ov_names_x_1)) {
       lav_msg_stop(
@@ -746,19 +762,19 @@ lav_data_full <- function(data = NULL, # data.frame
     }
   }
   # check for ordered exogenous variables
-  if ("ordered" %in% ov$type[ov$name %in% unlist(ov_names_x)]) {
+  if ("ordered" %in% ov$type[ov$name %in% ov_names_x_1]) {
     f_names <- ov$name[ov$type == "ordered" &
-      ov$name %in% unlist(ov_names_x)]
-    if (any(f_names %in% unlist(ov_names_x))) {
+      ov$name %in% ov_names_x_1]
+    if (any(f_names %in% ov_names_x_1)) {
       lav_msg_warn(gettextf(
         "exogenous variable(s) declared as ordered in data: %s",
         lav_msg_view(f_names, log_sep = "none")))
     }
   }
   # check for ordered endogenous variables with more than 12 levels
-  if ("ordered" %in% ov$type[!ov$name %in% unlist(ov_names_x)]) {
+  if ("ordered" %in% ov$type[!ov$name %in% ov_names_x_1]) {
     f_names <- ov$name[ov$type == "ordered" &
-      !ov$name %in% unlist(ov_names_x) &
+      !ov$name %in% ov_names_x_1 &
       ov$nlev > 12L]
     if (length(f_names) > 0L) {
       lav_msg_warn(gettextf(
@@ -832,8 +848,14 @@ lav_data_full <- function(data = NULL, # data.frame
   # check for perfect correlations (NOT including exo variables)
   if (!allow_single_case && any(ov$type == "numeric")) {
     num_idx <- which(ov$type == "numeric" & ov$exo == 0L)
-    cor_1 <- try(cor(data[, ov$idx[num_idx]], use = "pairwise.complete.obs"),
-               silent = TRUE)
+    if (!is.null(complete_single_group_x) &&
+        identical(num_idx, complete_single_group_ov_row_idx)) {
+      cor_1 <- try(cor(complete_single_group_x, use = "pairwise.complete.obs"),
+        silent = TRUE)
+    } else {
+      cor_1 <- try(cor(data[, ov$idx[num_idx]], use = "pairwise.complete.obs"),
+        silent = TRUE)
+    }
     # replace any NAs by 0 (as we only wish to detect perfect correlations)
     cor_1[is.na(cor_1)] <- 0
     if (!inherits(cor_1, "try-error") &&
@@ -872,15 +894,26 @@ lav_data_full <- function(data = NULL, # data.frame
       # keep 'joint' (Y,X) matrix in @X if multilevel (or always?)
       # yes for multilevel (for now); no for clustered only
       ov_names_2 <- unique(c(ov_names[[g]], ov_names_x[[g]]))
-      ov_idx <- ov$idx[match(ov_names_2, ov$name)]
+      ov_row_idx <- match(ov_names_2, ov$name)
+      ov_idx <- ov$idx[ov_row_idx]
     } else {
-      ov_idx <- ov$idx[match(ov_names[[g]], ov$name)]
+      ov_row_idx <- match(ov_names[[g]], ov$name)
+      ov_idx <- ov$idx[ov_row_idx]
     }
     exo_idx <- ov$idx[match(ov_names_x[[g]], ov$name)]
     all_idx <- unique(c(ov_idx, exo_idx))
+    use_complete_single_group <- (
+      ngroups == 1L && length(group_label) == 0L && nlevels == 1L &&
+        length(cluster) == 0L && length(exo_idx) == 0L &&
+        missing == "listwise" && nrow(data) > 0L &&
+        all(ov$nobs[ov_row_idx] == nrow(data))
+    )
 
     # extract cases per group
-    if (ngroups > 1L || length(group_label) > 0L) {
+    if (use_complete_single_group) {
+      case_idx[[g]] <- seq_len(nrow(data))
+      nobs[[g]] <- norig[[g]] <- length(case_idx[[g]])
+    } else if (ngroups > 1L || length(group_label) > 0L) {
       if (missing == "listwise") {
         case_idx[[g]] <- which(data[[group]] == group_label[g] &
           complete.cases(data[all_idx]))
@@ -948,7 +981,14 @@ lav_data_full <- function(data = NULL, # data.frame
 
     # extract data
     #X[[g]] <- datam[case.idx[[g]], ov.idx, drop = FALSE]
-    x[[g]] <- data.matrix(data[case_idx[[g]], ov_idx, drop = FALSE])
+    if (!is.null(complete_single_group_x) &&
+        identical(ov_row_idx, complete_single_group_ov_row_idx)) {
+      x[[g]] <- complete_single_group_x
+    } else if (use_complete_single_group) {
+      x[[g]] <- data.matrix(data[, ov_idx, drop = FALSE])
+    } else {
+      x[[g]] <- data.matrix(data[case_idx[[g]], ov_idx, drop = FALSE])
+    }
     dimnames(x[[g]]) <- NULL ### copy?
 
     # sampling weights (but no normalization yet)

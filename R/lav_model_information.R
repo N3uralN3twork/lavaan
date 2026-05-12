@@ -447,6 +447,12 @@ lav_model_information_firstorder <- function(lavmodel = NULL,
 
   # 3. compute Information per group
   Info.group <- vector("list", length = lavsamplestats@ngroups)
+  has_sampling_weights <- length(lavdata@sampling.weights) > 0L
+  totalwt <- if (has_sampling_weights) {
+    sum(unlist(lavdata@weights))
+  } else {
+    NULL
+  }
   for (g in 1:lavsamplestats@ngroups) {
     # unweighted (needed in lav_test?)
     B0.group[[g]] <- t(Delta[[g]]) %*% B1[[g]] %*% Delta[[g]]
@@ -459,7 +465,6 @@ lav_model_information_firstorder <- function(lavmodel = NULL,
     if (is.null(wt)) {
       fg <- lavsamplestats@nobs[[g]] / lavsamplestats@ntotal
     } else {
-      totalwt <- sum(unlist(lavdata@weights))
       fg <- sum(wt) / totalwt
     }
 
@@ -484,10 +489,10 @@ lav_model_information_firstorder <- function(lavmodel = NULL,
   # >>>>>>>> HJ/MK PML CODE >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
   if (lavmodel@estimator == "PML" || lavmodel@estimator == "MML") {
-    if (length(lavdata@sampling.weights) == 0) {
+    if (!has_sampling_weights) {
       the_N <- lavsamplestats@ntotal
     } else {
-      the_N <- sum(unlist(lavdata@weights))
+      the_N <- totalwt
     }
     Information <- Information / the_N
     for (g in 1:lavsamplestats@ngroups) {

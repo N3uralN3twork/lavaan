@@ -85,13 +85,21 @@ lav_dataframe_vartable <- function(frame = NULL, ov_names = NULL,
     }
 
     type[i] <- type_x
-    nobs[i] <- sum(!is.na(x))
-    mean[i] <- ifelse(type_x == "numeric", mean(x, na.rm = TRUE),
-      as.numeric(NA)
-    )
-    var[i] <- ifelse(type_x == "numeric", var(x, na.rm = TRUE),
-      as.numeric(NA)
-    )
+    if (type_x == "numeric") {
+      if (anyNA(x)) {
+        nobs[i] <- sum(!is.na(x))
+        mean[i] <- mean(x, na.rm = TRUE)
+        var[i] <- var(x, na.rm = TRUE)
+      } else {
+        nobs[i] <- length(x)
+        mean[i] <- mean(x)
+        var[i] <- var(x)
+      }
+    } else {
+      nobs[i] <- sum(!is.na(x))
+      mean[i] <- as.numeric(NA)
+      var[i] <- as.numeric(NA)
+    }
   }
 
   var_1 <- list(

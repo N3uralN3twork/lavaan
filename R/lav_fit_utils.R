@@ -190,16 +190,15 @@ lav_fit_fiml_corrected <- function(lavobject, baseline_model,
   fit_tilde@Options$h1.information <- c("unstructured", "unstructured")
   fit_tilde@Options$observed.information <- c("h1", "h1")
 
-  wm <- wm_g <- lav_model_h1_information_observed(lavobject)
-  wc <- wc_g <- lav_model_h1_information_observed(fit_tilde)
+  wm <- lav_model_h1_information_observed(lavobject)
+  wc <- lav_model_h1_information_observed(fit_tilde)
 
   if (version == "V3") {
-    jm <- jm_g <- lav_model_h1_information_firstorder(lavobject)
-    gamma_f <- vector("list", length = lavdata@ngroups)
+    jm <- lav_model_h1_information_firstorder(lavobject)
   }
   delta <- lavTech(lavobject, "delta")
   e_inv <- lavTech(lavobject, "inverted.information")
-  wmi <- wmi_g <- try(lapply(wm, lav_matrix_symmetric_inverse),
+  wmi <- try(lapply(wm, lav_matrix_symmetric_inverse),
     silent = TRUE
   )
   if (inherits(wmi, "try-error")) {
@@ -207,51 +206,119 @@ lav_fit_fiml_corrected <- function(lavobject, baseline_model,
   }
 
   fg <- unlist(lavsamplestats@nobs) / lavsamplestats@ntotal
-  # Fixme: as we only need the trace, perhaps we could do this
-  # group-specific? (see lav_test_satorra_bentler_trace_original)
-  for (g in seq_len(lavdata@ngroups)) {
-    # group weight
-    wc_g[[g]] <- fg[g] * wc[[g]]
-    wm_g[[g]] <- fg[g] * wm[[g]]
-    wmi_g[[g]] <- 1 / fg[g] * wmi[[g]]
+  trace_parts_group <- function(delta_list, e_inv, want_v3 = TRUE) {
+    e_comp <- NULL
+    j_comp <- NULL
+    jw_comp <- NULL
+    tr1 <- 0
+    tr11 <- 0
 
-    # gamma
-    if (version == "V3") {
-      jm_g[[g]] <- fg[g] * jm[[g]]
-      gamma_g <- wmi[[g]] %*% jm[[g]] %*% wmi[[g]]
-      gamma_f[[g]] <- 1 / fg[g] * gamma_g
+    for (g in seq_len(lavdata@ngroups)) {
+      delta_g <- delta_list[[g]]
+
+      # Block-diagonal products are independent by group; summing their
+      # parameter-space contributions avoids allocating the zero blocks.
+      wc_delta_g <- wc[[g]] %*% delta_g
+      e_comp_g <- fg[g] * crossprod(delta_g, wc_delta_g)
+      e_comp <- if (is.null(e_comp)) e_comp_g else e_comp + e_comp_g
+
+      tr1 <- tr1 + sum(wc[[g]] * wmi[[g]])
+
+      if (want_v3) {
+        jm_delta_g <- jm[[g]] %*% delta_g
+        j_comp_g <- fg[g] * crossprod(delta_g, jm_delta_g)
+        j_comp <- if (is.null(j_comp)) j_comp_g else j_comp + j_comp_g
+
+        jw_delta_g <- jm[[g]] %*% wmi[[g]] %*% wc_delta_g
+        jw_comp_g <- fg[g] * crossprod(delta_g, jw_delta_g)
+        jw_comp <- if (is.null(jw_comp)) jw_comp_g else jw_comp + jw_comp_g
+
+        gamma_g <- wmi[[g]] %*% jm[[g]] %*% wmi[[g]]
+        tr11 <- tr11 + sum(wc[[g]] * gamma_g)
+      }
+    }
+
+    out <- list(e.comp = e_comp, tr1 = tr1)
+    if (want_v3) {
+      out$tr11 <- tr11
+      out$tr12 <- sum(jw_comp * e_inv)
+      out$tr22 <- sum((j_comp %*% e_inv) * t(e_comp %*% e_inv))
+    }
+    out
+  }
+
+  trace_parts_big <- function(delta_list, e_inv, want_v3 = TRUE) {
+    wc_g <- wc
+    wmi_g <- wmi
+
+    if (want_v3) {
+      jm_g <- jm
+      gamma_f <- vector("list", length = lavdata@ngroups)
+    }
+    for (g in seq_len(lavdata@ngroups)) {
+      wc_g[[g]] <- fg[g] * wc[[g]]
+      wmi_g[[g]] <- 1 / fg[g] * wmi[[g]]
+
+      if (want_v3) {
+        jm_g[[g]] <- fg[g] * jm[[g]]
+        gamma_g <- wmi[[g]] %*% jm[[g]] %*% wmi[[g]]
+        gamma_f[[g]] <- 1 / fg[g] * gamma_g
+      }
+    }
+
+    wc_all <- lav_matrix_bdiag(wc_g)
+    wmi_all <- lav_matrix_bdiag(wmi_g)
+    delta_all <- do.call("rbind", delta_list)
+    e_comp <- t(delta_all) %*% wc_all %*% delta_all
+
+    out <- list(e.comp = e_comp)
+    if (want_v3) {
+      jm_all <- lav_matrix_bdiag(jm_g)
+      gamma_all <- lav_matrix_bdiag(gamma_f)
+      out$tr11 <- sum(wc_all * gamma_all)
+      out$tr12 <- sum((t(delta_all) %*% jm_all %*% wmi_all %*%
+        wc_all %*% delta_all) * e_inv)
+      out$tr22 <- sum((t(delta_all) %*% jm_all %*% delta_all %*% e_inv) *
+        t(e_comp %*% e_inv))
+    } else {
+      out$tr1 <- sum(wc_all * wmi_all)
+    }
+    out
+  }
+
+  trace_obj <- if (lavdata@ngroups > 1L) {
+    try(trace_parts_group(delta, e_inv, want_v3 = (version == "V3")),
+      silent = TRUE
+    )
+  } else {
+    try(trace_parts_big(delta, e_inv, want_v3 = (version == "V3")),
+      silent = TRUE
+    )
+  }
+  if (inherits(trace_obj, "try-error")) {
+    trace_obj <- try(trace_parts_big(delta, e_inv, want_v3 = (version == "V3")),
+      silent = TRUE
+    )
+    if (inherits(trace_obj, "try-error")) {
+      return(empty_list)
     }
   }
-  # create 'big' matrices
-  wc_all <- lav_matrix_bdiag(wc_g)
-  wm_all <- lav_matrix_bdiag(wm_g)
-  wmi_all <- lav_matrix_bdiag(wmi_g)
-  delta_all <- do.call("rbind", delta)
-
-  e_comp <- t(delta_all) %*% wc_all %*% delta_all
+  e_comp <- trace_obj$e.comp
                # VS: or grab from fit.tilde, with observed.info="h1"
-
 
   # compute trace
   if (version == "V3") {
-    gamma_all <- lav_matrix_bdiag(gamma_f)
-    # VS: Simplification of k.fimlc to minimize matrix multiplication
-    #                                                 of big matrices
-    jm_all <- lav_matrix_bdiag(jm_g)
-
     # VS: tr11 is also used for baseline
     # VS: tr(AB) = sum(A*t(B)) is more efficient
 
-    tr11 <- sum(wc_all * gamma_all)
-    tr12 <- sum((t(delta_all) %*% jm_all %*% wmi_all %*%
-                 wc_all %*% delta_all) * e_inv)
-    tr22 <- sum((t(delta_all) %*% jm_all %*% delta_all %*% e_inv)
-             * t(t(delta_all) %*% wc_all %*% delta_all %*% e_inv))
+    tr11 <- trace_obj$tr11
+    tr12 <- trace_obj$tr12
+    tr22 <- trace_obj$tr22
 
     k_fimlc <- tr11 - 2 * tr12 + tr22
   } else {
     # V6
-    tr1 <- sum(wc_all * wmi_all)
+    tr1 <- trace_obj$tr1
     k_fimlc <- tr1 - sum(e_comp * e_inv)
   }
 
@@ -306,18 +373,30 @@ lav_fit_fiml_corrected <- function(lavobject, baseline_model,
 
   e_inv_b <- lavTech(fit_b, "inverted.information")
   delta_b <- lavTech(fit_b, "Delta")
-  delta_b_all <- do.call("rbind", delta_b)
-
-  e_comp_b <- t(delta_b_all) %*% wc_all %*% delta_b_all #or grab from fitB.tilde
+  trace_b <- if (lavdata@ngroups > 1L) {
+    try(trace_parts_group(delta_b, e_inv_b, want_v3 = (version == "V3")),
+      silent = TRUE
+    )
+  } else {
+    try(trace_parts_big(delta_b, e_inv_b, want_v3 = (version == "V3")),
+      silent = TRUE
+    )
+  }
+  if (inherits(trace_b, "try-error")) {
+    trace_b <- try(trace_parts_big(delta_b, e_inv_b,
+      want_v3 = (version == "V3")),
+      silent = TRUE
+    )
+    if (inherits(trace_b, "try-error")) {
+      return(out)
+    }
+  }
+  e_comp_b <- trace_b$e.comp #or grab from fitB.tilde
 
   # V3 or V6?
   if (version == "V3") {
-    tr12b <-
-      sum((t(delta_b_all) %*% jm_all %*% wmi_all %*% wc_all %*% delta_b_all) *
-        e_inv_b)
-    tr22b <-
-      sum((t(delta_b_all) %*% jm_all %*% delta_b_all %*% e_inv_b) *
-        t(t(delta_b_all) %*% wc_all %*% delta_b_all %*% e_inv_b))
+    tr12b <- trace_b$tr12
+    tr22b <- trace_b$tr22
     kb_fimlc <- tr11 - 2 * tr12b + tr22b
   } else {
     # V6
