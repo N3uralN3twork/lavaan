@@ -7,7 +7,6 @@ lav_lavaan_step15_baseline_fast <- function(lavoptions = NULL,
       !(lavoptions$likelihood %in% c("normal", "wishart")) ||
       (!is.null(lavoptions$baseline.type) &&
        !identical(lavoptions$baseline.type, "independence")) ||
-      isTRUE(lavoptions$meanstructure) ||
       isTRUE(lavoptions$conditional.x) ||
       isTRUE(lavoptions$correlation) ||
       isTRUE(lavoptions$group.w.free) ||
@@ -45,27 +44,47 @@ lav_lavaan_step15_baseline_fast <- function(lavoptions = NULL,
     return(NULL)
   }
 
+  # Meanstructure independence models still have closed-form ML estimates when
+  # the baseline only adds free observed means. If observed variables are used
+  # as regressors, their covariance terms are also needed, so use the full path.
+  if (isTRUE(lavoptions$meanstructure)) {
+    rhs_is_ov <- lavpartable$op == "~" & lavpartable$rhs %in% ov_names
+    if (any(rhs_is_ov)) {
+      return(NULL)
+    }
+    sample_mean <- lavsamplestats@mean[[1L]]
+    if (is.null(sample_mean) || length(sample_mean) != length(observed_var) ||
+        any(!is.finite(sample_mean))) {
+      return(NULL)
+    }
+  } else {
+    sample_mean <- NULL
+  }
+
   nvar <- length(observed_var)
+  nmean <- length(sample_mean)
+  npar <- nvar + nmean
+  mean_names <- if (nmean > 0L) ov_names else character(0L)
   partable <- list(
-    id = seq_len(nvar),
-    lhs = ov_names,
-    op = rep("~~", nvar),
-    rhs = ov_names,
-    user = rep(1L, nvar),
-    block = rep(1L, nvar),
-    group = rep(1L, nvar),
-    free = seq_len(nvar),
-    ustart = observed_var,
-    exo = rep(0L, nvar),
-    label = rep("", nvar)
+    id = seq_len(npar),
+    lhs = c(ov_names, mean_names),
+    op = c(rep("~~", nvar), rep("~1", nmean)),
+    rhs = c(ov_names, rep("", nmean)),
+    user = rep(1L, npar),
+    block = rep(1L, npar),
+    group = rep(1L, npar),
+    free = seq_len(npar),
+    ustart = c(observed_var, sample_mean),
+    exo = rep(0L, npar),
+    label = rep("", npar)
   )
 
   if (!is.null(lavoptions$optim.bounds)) {
-    partable$lower <- rep(0, nvar)
-    partable$upper <- rep(Inf, nvar)
+    partable$lower <- c(rep(0, nvar), rep(-Inf, nmean))
+    partable$upper <- rep(Inf, npar)
   }
-  partable$start <- observed_var
-  partable$est <- observed_var
+  partable$start <- c(observed_var, sample_mean)
+  partable$est <- c(observed_var, sample_mean)
 
   fx_group <- 0.5 * (sum(log(observed_var)) - sample_log_det)
   if (is.finite(fx_group) && fx_group < 0.0) {
