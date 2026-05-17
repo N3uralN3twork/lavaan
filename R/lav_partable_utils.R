@@ -1,5 +1,10 @@
 # what are the block values (not necessarily integers)
 lav_partable_block_values <- function(partable) {
+  cached_values <- attr(partable, "block.values", exact = TRUE)
+  if (!is.null(cached_values)) {
+    return(cached_values)
+  }
+
   if (is.null(partable$block)) {
     block_values <- 1L
   } else {
