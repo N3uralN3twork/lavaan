@@ -14,8 +14,7 @@ lav_lavaan_step15_baseline_fast <- function(lavoptions = NULL,
       !identical(lavdata@missing, "listwise") ||
       isTRUE(lavsamplestats@missing.flag) ||
       length(lavdata@ordered) > 0L ||
-      any(lavdata@ov$type != "numeric") ||
-      any(lengths(lavdata@ov.names.x) > 0L)) {
+      any(lavdata@ov$type != "numeric")) {
     return(NULL)
   }
 
@@ -25,14 +24,20 @@ lav_lavaan_step15_baseline_fast <- function(lavoptions = NULL,
     return(NULL)
   }
 
+  sample_covs <- vector("list", ngroups)
   observed_var <- vector("list", ngroups)
   ov_names <- vector("list", ngroups)
+  ov_names_x <- vector("list", ngroups)
+  ov_names_nox <- vector("list", ngroups)
+  exo_idx <- vector("list", ngroups)
   sample_log_det <- numeric(ngroups)
+  model_log_det <- numeric(ngroups)
   for (g in seq_len(ngroups)) {
     sample_cov <- lavsamplestats@cov[[g]]
     if (!is.matrix(sample_cov) || anyNA(sample_cov)) {
       return(NULL)
     }
+    sample_covs[[g]] <- sample_cov
 
     observed_var[[g]] <- diag(sample_cov)
     if (length(observed_var[[g]]) == 0L ||
@@ -54,15 +59,47 @@ lav_lavaan_step15_baseline_fast <- function(lavoptions = NULL,
         any(!nzchar(ov_names[[g]]))) {
       return(NULL)
     }
+
+    ov_names_x[[g]] <- lavdata@ov.names.x[[g]]
+    if (is.null(ov_names_x[[g]])) {
+      ov_names_x[[g]] <- character(0L)
+    }
+    if (length(ov_names_x[[g]]) > 0L) {
+      if (!isTRUE(lavoptions$fixed.x) ||
+          !isTRUE(lavoptions$baseline.fixed.x.free.cov) ||
+          any(!ov_names_x[[g]] %in% ov_names[[g]])) {
+        return(NULL)
+      }
+    }
+    ov_names_nox[[g]] <- ov_names[[g]][!ov_names[[g]] %in% ov_names_x[[g]]]
+    exo_idx[[g]] <- match(ov_names_x[[g]], ov_names[[g]])
+
+    model_log_det[[g]] <- sum(log(observed_var[[g]][
+      !ov_names[[g]] %in% ov_names_x[[g]]
+    ]))
+    if (length(exo_idx[[g]]) > 0L) {
+      sample_cov_x <- sample_cov[exo_idx[[g]], exo_idx[[g]], drop = FALSE]
+      sample_log_det_x <- determinant(
+        sample_cov_x,
+        logarithm = TRUE
+      )$modulus
+      sample_log_det_x <- as.numeric(sample_log_det_x)
+      if (!is.finite(sample_log_det_x)) {
+        return(NULL)
+      }
+      model_log_det[[g]] <- model_log_det[[g]] + sample_log_det_x
+    }
   }
 
   # Meanstructure independence models still have closed-form ML estimates when
-  # the baseline only adds free observed means. If observed variables are used
-  # as regressors, their covariance terms are also needed, so use the full path.
+  # the baseline only adds observed means. Observed fixed.x regressors are okay:
+  # their sample moments are fixed in the baseline partable.
   if (isTRUE(lavoptions$meanstructure)) {
     rhs_is_ov <- lavpartable$op == "~" &
       lavpartable$rhs %in% unlist(ov_names, use.names = FALSE)
-    if (any(rhs_is_ov)) {
+    fixed_ov_x <- unlist(ov_names_x, use.names = FALSE)
+    rhs_is_free_ov <- rhs_is_ov & !lavpartable$rhs %in% fixed_ov_x
+    if (any(rhs_is_free_ov)) {
       return(NULL)
     }
     if (length(lavsamplestats@mean) != ngroups) {
@@ -87,24 +124,58 @@ lav_lavaan_step15_baseline_fast <- function(lavoptions = NULL,
   for (g in seq_len(ngroups)) {
     nvar <- length(observed_var[[g]])
     nmean <- length(sample_mean[[g]])
-    npar_g <- nvar + nmean
     mean_names <- if (nmean > 0L) ov_names[[g]] else character(0L)
+    ov_is_x <- ov_names[[g]] %in% ov_names_x[[g]]
+    mean_is_x <- mean_names %in% ov_names_x[[g]]
 
     lhs <- c(lhs, ov_names[[g]], mean_names)
     op <- c(op, rep("~~", nvar), rep("~1", nmean))
     rhs <- c(rhs, ov_names[[g]], rep("", nmean))
-    block <- c(block, rep(g, npar_g))
-    group <- c(group, rep(g, npar_g))
-    free <- c(free, seq_len(npar_g))
-    exo <- c(exo, rep(0L, npar_g))
-    label <- c(label, rep("", npar_g))
+    block <- c(block, rep(g, nvar + nmean))
+    group <- c(group, rep(g, nvar + nmean))
+    free <- c(free, as.integer(!ov_is_x), as.integer(!mean_is_x))
+    exo <- c(exo, as.integer(ov_is_x), as.integer(mean_is_x))
+    label <- c(label, rep("", nvar + nmean))
     start_est <- c(start_est, observed_var[[g]], sample_mean[[g]])
     if (!is.null(lavoptions$optim.bounds)) {
-      lower <- c(lower, rep(0, nvar), rep(-Inf, nmean))
-      upper <- c(upper, rep(Inf, npar_g))
+      lower <- c(
+        lower,
+        ifelse(ov_is_x, observed_var[[g]], 0),
+        ifelse(mean_is_x, sample_mean[[g]], -Inf)
+      )
+      upper <- c(
+        upper,
+        ifelse(ov_is_x, observed_var[[g]], Inf),
+        ifelse(mean_is_x, sample_mean[[g]], Inf)
+      )
+    }
+
+    nx <- length(ov_names_x[[g]])
+    if (nx > 1L) {
+      tmp <- utils::combn(ov_names_x[[g]], 2L)
+      cov_start <- sample_covs[[g]][
+        cbind(match(tmp[1L, ], ov_names[[g]]), match(tmp[2L, ], ov_names[[g]]))
+      ]
+      if (any(!is.finite(cov_start))) {
+        return(NULL)
+      }
+      ncov <- length(cov_start)
+      lhs <- c(lhs, tmp[1L, ])
+      op <- c(op, rep("~~", ncov))
+      rhs <- c(rhs, tmp[2L, ])
+      block <- c(block, rep(g, ncov))
+      group <- c(group, rep(g, ncov))
+      free <- c(free, rep(0L, ncov))
+      exo <- c(exo, rep(1L, ncov))
+      label <- c(label, rep("", ncov))
+      start_est <- c(start_est, cov_start)
+      if (!is.null(lavoptions$optim.bounds)) {
+        lower <- c(lower, cov_start)
+        upper <- c(upper, cov_start)
+      }
     }
   }
-  free <- seq_along(free)
+  free[free > 0L] <- seq_len(sum(free > 0L))
   partable <- list(
     id = seq_along(lhs),
     lhs = lhs,
@@ -128,7 +199,7 @@ lav_lavaan_step15_baseline_fast <- function(lavoptions = NULL,
 
   fx_group <- numeric(ngroups)
   for (g in seq_len(ngroups)) {
-    fx_group[[g]] <- 0.5 * (sum(log(observed_var[[g]])) - sample_log_det[[g]])
+    fx_group[[g]] <- 0.5 * (model_log_det[[g]] - sample_log_det[[g]])
     if (is.finite(fx_group[[g]]) && fx_group[[g]] < 0.0) {
       fx_group[[g]] <- 0.0
     }
@@ -140,8 +211,12 @@ lav_lavaan_step15_baseline_fast <- function(lavoptions = NULL,
   stat_group <- fx_group * nfac
   stat <- sum(stat_group)
   df <- sum(vapply(
-    observed_var,
-    function(var) length(var) * (length(var) - 1L) / 2L,
+    seq_len(ngroups),
+    function(g) {
+      nvar <- length(observed_var[[g]])
+      nx <- length(ov_names_x[[g]])
+      nvar * (nvar - 1L) / 2L - nx * (nx - 1L) / 2L
+    },
     numeric(1L)
   ))
   pvalue <- if (df == 0L) {
