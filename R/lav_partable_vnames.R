@@ -37,7 +37,10 @@ lav_partable_vnames_cached_block_select <- function(partable, dotdotdot) {
   }
   valid_row <- partable_block > 0L &
     !partable$op %in% c("==", "<", ">", ":=")
-  block_select <- unique(na.omit(partable_block[valid_row]))
+  block_select <- attr(partable, "block.values", exact = TRUE)
+  if (is.null(block_select)) {
+    block_select <- unique(na.omit(partable_block[valid_row]))
+  }
   if (length(block_select) == 0L) {
     lav_msg_warn(gettext("no blocks selected."))
     return(block_select)
