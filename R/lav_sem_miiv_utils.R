@@ -582,8 +582,10 @@ lav_sem_miiv_utils_jaca_rls <- function(lavmodel = NULL,
     for (j in seq_len(ncol(delta2))) {
       jw_theta2[, j] <- d_w_e2_from_v(delta2[, j])
     }
-    a <- minv_delta2t %*% jw_theta2
-    iminus_a_inv <- solve(diag(ncol(delta2)) - a)
+    A <- minv_delta2t %*% JW_theta2
+    IminusA <- -A
+    diag(IminusA) <- diag(IminusA) + 1
+    IminusA_inv <- solve(IminusA)
 
     for (k in seq_along(free_directed_idx)) {
       d_idx <- match(free_directed_idx[k], lavpartable$free)[1]

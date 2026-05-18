@@ -258,10 +258,16 @@ lav_data_simulate_old <- function( # user-specified model    # nolint start
   fit <- lavaan(model = lav, sample.nobs = sample.nobs, ...)
 
   # the model-implied moments for the population
-  sigma_hat <- lav_model_sigma(lavmodel = fit@Model)
-  mu_hat <- lav_model_mu(lavmodel = fit@Model)
+  implied_fast <- lav_model_implied_fast(
+    lavmodel = fit@Model,
+    need_sigma = TRUE,
+    need_mu = TRUE,
+    need_th = fit@Model@categorical
+  )
+  Sigma.hat <- implied_fast$sigma
+  Mu.hat <- implied_fast$mu
   if (fit@Model@categorical) {
-    th <- lav_model_th(lavmodel = fit@Model)
+    TH <- implied_fast$th
   }
 
   if (lav_debug()) {
