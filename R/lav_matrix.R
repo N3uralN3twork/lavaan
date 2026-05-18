@@ -36,6 +36,16 @@ lav_matrix_delta_A_delta <- function(delta, a1) {
 }
 
 
+lav_matrix_diag_prepost <- function(A, d) {
+  d <- as.vector(d)
+  if (length(d) == 0L) {
+    return(A)
+  }
+  A <- A * d
+  t(t(A) * d)
+}
+
+
 # Return matrix vector indices and values from row/column/value triples.
 lav_matrix_rowcol_idx <- function(row, col, value, nrow, ncol, symmetric = FALSE) {
   if (length(row) == 0L) {

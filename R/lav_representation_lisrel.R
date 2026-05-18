@@ -573,10 +573,10 @@ lav_lisrel_eeta <- function(mlist = NULL, mean_x = NULL,
 #     we return  a matrix of size [nobs x nfac]
 #
 lav_lisrel_eetax <- function(mlist = NULL, exo = NULL, n = nrow(exo),
-                             sample_mean = NULL,
-                             ov_y_dummy_ov_idx = NULL,
-                             ov_x_dummy_ov_idx = NULL,
-                             ov_y_dummy_lv_idx = NULL,
+                              sample_mean = NULL,
+                              ov_y_dummy_ov_idx = NULL,
+                              ov_x_dummy_ov_idx = NULL,
+                              ov_y_dummy_lv_idx = NULL,
                              ov_x_dummy_lv_idx = NULL) {
   mm_lambda <- mlist$lambda
   mm_beta <- mlist$beta
@@ -600,7 +600,7 @@ lav_lisrel_eetax <- function(mlist = NULL, exo = NULL, n = nrow(exo),
   eeta <- matrix(mm_alpha, n, nfac, byrow = TRUE)
 
   # put back eXo values if dummy
-  if (length(ov_x_dummy_lv_idx) > 0L) {
+  if (length(ov_x_dummy_lv_idx) > 0L && !is.null(exo)) {
     eeta[, ov_x_dummy_lv_idx] <- exo
   }
 
@@ -612,6 +612,9 @@ lav_lisrel_eetax <- function(mlist = NULL, exo = NULL, n = nrow(exo),
 
   # GAMMA?
   if (!is.null(mm_gamma)) {
+    if (is.null(exo)) {
+      exo <- matrix(0, n, ncol(mm_gamma))
+    }
     if (!is.null(mm_beta)) {
       eeta <- eeta + exo %*% t(ib_inv %*% mm_gamma)
     } else {
@@ -956,6 +959,14 @@ lav_lisrel_vy <- function(mlist = NULL) {
   vy
 }
 
+lav_lisrel_vy_diag <- function(mlist = NULL) {
+  mm_lambda <- mlist$lambda
+  mm_theta <- mlist$theta
+
+  veta <- lav_lisrel_veta(mlist = mlist)
+  rowSums((mm_lambda %*% veta) * mm_lambda) + diag(mm_theta)
+}
+
 # 5) VYx
 # compute V(Y*|x_i) == model-implied covariance matrix
 # this equals V(Y*) if no (explicit) eXo no GAMMA
@@ -1025,8 +1036,7 @@ lav_lisrel_sigma <- function(mlist = NULL, delta = TRUE) {
 
   # if delta, scale
   if (delta && !is.null(mlist$delta)) {
-    mm_delta <- diag(mlist$delta[, 1L], nrow = nvar, ncol = nvar)
-    vyx <- mm_delta %*% vyx %*% mm_delta
+    vyx <- lav_matrix_diag_prepost(vyx, mlist$delta[, 1L])
   }
 
   vyx
@@ -1108,8 +1118,7 @@ lav_lisrel_implied_fast <- function(mlist = NULL, th_idx = NULL,
 
     # if delta, scale
     if (delta && !is.null(mlist$delta)) {
-      mm_delta <- diag(mlist$delta[, 1L], nrow = nvar, ncol = nvar)
-      vyx <- mm_delta %*% vyx %*% mm_delta
+      vyx <- lav_matrix_diag_prepost(vyx, mlist$delta[, 1L])
     }
 
     out$sigma <- vyx
@@ -1869,9 +1878,11 @@ lav_lisrel_cov_both <- function(mlist = NULL, delta = TRUE) {
 
   # if delta, scale
   if (delta && !is.null(mlist$delta)) {
-    mm_delta <- diag(mlist$delta[, 1L], nrow = nvar, ncol = nvar)
     cov_1[seq_len(nvar), seq_len(nvar)] <-
-      mm_delta %*% cov_1[seq_len(nvar), seq_len(nvar)] %*% mm_delta
+      lav_matrix_diag_prepost(
+        cov_1[seq_len(nvar), seq_len(nvar), drop = FALSE],
+        mlist$delta[, 1L]
+      )
   }
 
 

@@ -248,14 +248,20 @@ lav_model_cond2joint_sigma <- function(lavmodel = NULL, glist = NULL,
     mlist <- glist[mm_in_group]
 
     if (representation == "LISREL") {
-      res_sigma <- lav_lisrel_sigma(mlist = mlist, delta = delta)
-      # res.int <- lav_lisrel_mu(MLIST = MLIST)
-      res_slopes <- lav_lisrel_pi(mlist = mlist)
+      implied <- lav_lisrel_implied_fast(
+        mlist = mlist,
+        th_idx = lavmodel@th.idx[[g]],
+        need_sigma = TRUE,
+        need_pi = TRUE,
+        delta = delta
+      )
+      res_sigma <- implied$sigma
+      res_slopes <- implied$pi
       s_xx <- mlist$cov.x
 
-      s_yy <- res_sigma + res_slopes %*% s_xx %*% t(res_slopes)
       s_yx <- res_slopes %*% s_xx
-      s_xy <- s_xx %*% t(res_slopes)
+      s_yy <- res_sigma + tcrossprod(s_yx, res_slopes)
+      s_xy <- t(s_yx)
 
       sigma_hat[[g]] <- rbind(cbind(s_yy, s_yx), cbind(s_xy, s_xx))
     } else {
@@ -310,8 +316,14 @@ lav_model_cond2joint_mu <- function(lavmodel = NULL, glist = NULL) {
       mu_hat[[g]] <- numeric(lavmodel@nvar[g])
     } else if (representation == "LISREL") {
       mlist <- glist[mm_in_group]
-      res_int <- lav_lisrel_mu(mlist = mlist)
-      res_slopes <- lav_lisrel_pi(mlist = mlist)
+      implied <- lav_lisrel_implied_fast(
+        mlist = mlist,
+        th_idx = lavmodel@th.idx[[g]],
+        need_mu = TRUE,
+        need_pi = TRUE
+      )
+      res_int <- implied$mu
+      res_slopes <- implied$pi
       m_x <- mlist$mean.x
 
       mu_y <- res_int + res_slopes %*% m_x
@@ -413,20 +425,28 @@ lav_model_vy <- function(lavmodel = NULL, glist = NULL, diagonal_only = FALSE) {
     mlist <- glist[mm_in_group]
 
     if (representation == "LISREL") {
-      vy_g <- lav_lisrel_vy(mlist = mlist)
+      if (diagonal_only) {
+        vy_g <- lav_lisrel_vy_diag(mlist = mlist)
+      } else {
+        vy_g <- lav_lisrel_vy(mlist = mlist)
+      }
     } else if (representation == "RAM") {
       # does not work for categorical setting yet
       stopifnot(!lavmodel@categorical)
       # does not work if conditional.x = TRUE
       stopifnot(!lavmodel@conditional.x)
-      vy_g <- lav_ram_sigmahat(mlist = mlist)
+      if (diagonal_only) {
+        vy_g <- lav_ram_sigmahat_diag(mlist = mlist)
+      } else {
+        vy_g <- lav_ram_sigmahat(mlist = mlist)
+      }
     } else {
       lav_msg_stop(gettext(
         "only RAM and LISREL representation has been implemented for now"))
     }
 
     if (diagonal_only) {
-      vy[[g]] <- diag(vy_g)
+      vy[[g]] <- if (is.matrix(vy_g)) diag(vy_g) else vy_g
     } else {
       vy[[g]] <- vy_g
     }
@@ -643,10 +663,6 @@ lav_model_eetax <- function(lavmodel = NULL, glist = NULL,
     mlist <- glist[mm_in_group]
 
     exo_1 <- exo[[g]]
-    if (is.null(exo_1)) {
-      # create empty matrix
-      exo_1 <- matrix(0, nobs[[g]], 0L)
-    }
 
     if (representation == "LISREL") {
       eetax_g <- lav_lisrel_eetax(mlist,

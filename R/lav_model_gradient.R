@@ -751,10 +751,15 @@ lav_model_delta_numerical <- function(lavmodel = NULL, glist = NULL, g = 1L) {
 
   compute_moments <- function(x) {
     glist <- lav_model_x2glist(lavmodel = lavmodel, x = x, type = "free")
-    sigma_hat <- lav_model_sigma(lavmodel = lavmodel, glist = glist)
+    implied_fast <- lav_model_implied_fast(
+      lavmodel = lavmodel, glist = glist,
+      need_sigma = TRUE,
+      need_mu = lavmodel@meanstructure
+    )
+    sigma_hat <- implied_fast$sigma
     s_vec <- lav_matrix_vech(sigma_hat[[g]])
     if (lavmodel@meanstructure) {
-      mu_hat <- lav_model_mu(lavmodel = lavmodel, glist = glist)
+      mu_hat <- implied_fast$mu
       out <- c(mu_hat[[g]], s_vec)
     } else {
       out <- s_vec
