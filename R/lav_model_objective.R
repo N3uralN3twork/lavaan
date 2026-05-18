@@ -4,7 +4,8 @@ lav_model_objective <- function(lavmodel = NULL,
                                 glist = NULL,
                                 lavsamplestats = NULL,
                                 lavdata = NULL,
-                                lavcache = NULL) {
+                                lavcache = NULL,
+                                implied = NULL) {
   # state or final?
   if (is.null(glist)) glist <- lavmodel@GLIST
 
@@ -50,18 +51,26 @@ lav_model_objective <- function(lavmodel = NULL,
     ) # ,
     # cov.x = lavsamplestats@cov.x)
     if (estimator == "NTRLS") {
-      sigma_hat <- lav_model_sigma(
+      implied_fast <- lav_model_implied_fast_state(
         lavmodel = lavmodel, glist = glist,
+        implied = implied,
+        need_sigma = TRUE,
+        need_mu = TRUE,
         extra = TRUE
       )
-      mu_hat <- lav_model_mu(lavmodel = lavmodel, glist = glist)
+      sigma_hat <- implied_fast$sigma
+      mu_hat <- implied_fast$mu
     }
     if (estimator == "DLS" && estimator_args$dls.GammaNT == "model") {
-      sigma_hat <- lav_model_sigma(
+      implied_fast <- lav_model_implied_fast_state(
         lavmodel = lavmodel, glist = glist,
+        implied = implied,
+        need_sigma = TRUE,
+        need_mu = TRUE,
         extra = FALSE
       )
-      mu_hat <- lav_model_mu(lavmodel = lavmodel, glist = glist)
+      sigma_hat <- implied_fast$sigma
+      mu_hat <- implied_fast$mu
     }
     if (lav_debug()) print(wls_est)
   } else if (estimator %in% c("ML", "GLS", "PML", "FML", "REML", "catML") &&
@@ -72,13 +81,19 @@ lav_model_objective <- function(lavmodel = NULL,
     #                     GLIST = GLIST, lavsamplestats = lavsamplestats,
     #                     extra = (estimator %in% c("ML", "REML","NTRLS")))
     # } else {
-    sigma_hat <- lav_model_sigma(
+    implied_fast <- lav_model_implied_fast_state(
       lavmodel = lavmodel, glist = glist,
+      implied = implied,
+      need_sigma = TRUE,
+      need_mu = meanstructure,
+      need_th = categorical,
+      need_pi = conditional_x,
       extra = (estimator %in% c(
         "ML", "REML",
         "NTRLS", "catML"
       ))
     )
+    sigma_hat <- implied_fast$sigma
     # }
 
     # if (estimator == "REML") {
@@ -99,16 +114,16 @@ lav_model_objective <- function(lavmodel = NULL,
       #    Mu.hat <- lav_model_cond2joint_mu(lavmodel = lavmodel, GLIST = GLIST,
       #                           lavsamplestats = lavsamplestats)
       # } else {
-      mu_hat <- lav_model_mu(lavmodel = lavmodel, glist = glist)
+      mu_hat <- implied_fast$mu
       # }
     }
 
     if (categorical) {
-      th <- lav_model_th(lavmodel = lavmodel, glist = glist)
+      th <- implied_fast$th
     }
 
     if (conditional_x) {
-      pi0 <- lav_model_pi(lavmodel = lavmodel, glist = glist)
+      pi0 <- implied_fast$pi
     }
 
     if (group_w_free) {
