@@ -211,12 +211,24 @@ lav_ram_sigmahat <- function(mlist = NULL, delta = NULL) {
 
   # if delta, scale
   if (!is.null(mlist$delta) && delta) {
-    nvar <- ncol(vy)
-    mm_delta <- diag(mlist$delta[, 1L], nrow = nvar, ncol = nvar)
-    vy <- mm_delta %*% vy %*% mm_delta
+    vy <- lav_matrix_diag_prepost(vy, mlist$delta[, 1L])
   }
 
   vy
+}
+
+lav_ram_sigmahat_diag <- function(mlist = NULL, delta = NULL) {
+  ov_idx <- as.integer(mlist$ov.idx[1, ])
+  ia_inv <- lav_matrix_inverse_iminus(mlist$A)
+  ia_inv_ov <- ia_inv[ov_idx, , drop = FALSE]
+
+  vy_diag <- rowSums((ia_inv_ov %*% mlist$S) * ia_inv_ov)
+  if (!is.null(mlist$delta) && delta) {
+    d <- as.vector(mlist$delta[, 1L])
+    vy_diag <- vy_diag * d * d
+  }
+
+  vy_diag
 }
 
 # VETA: the variance/covariance matrix of the latent variables only
@@ -283,9 +295,7 @@ lav_ram_implied_fast <- function(mlist = NULL,
 
     # if delta, scale
     if (!is.null(mlist$delta) && delta) {
-      nvar <- ncol(vy)
-      mm_delta <- diag(mlist$delta[, 1L], nrow = nvar, ncol = nvar)
-      vy <- mm_delta %*% vy %*% mm_delta
+      vy <- lav_matrix_diag_prepost(vy, mlist$delta[, 1L])
     }
 
     out$sigma <- vy
