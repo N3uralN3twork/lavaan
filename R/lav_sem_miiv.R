@@ -436,8 +436,9 @@ lav_sem_miiv_2sls_samplestats <- function(x = NULL, samplestats = FALSE,
       fit_y_on_xhat <- list()
       if (iv_flag) {
         # Step 1: compute S_ZZ^{-1} S_ZX and S_ZZ^{-1} S_Zy
-        m_w <- lav_matrix_symmetric_solve_spd(s_zz, s_zx)
-        v <- lav_matrix_symmetric_solve_spd(s_zz, s_zy)
+        zw <- lav_matrix_symmetric_solve_spd(s_zz, cbind(s_zx, s_zy))
+        m_w <- zw[, seq_len(nx), drop = FALSE]
+        v <- zw[, nx + 1L, drop = FALSE]
         # Step 2: build reduced system
         amat <- s_xz %*% m_w
         bvec <- s_xz %*% v
@@ -499,7 +500,7 @@ lav_sem_miiv_2sls_samplestats <- function(x = NULL, samplestats = FALSE,
             sweep(ex[, a_vec, drop = FALSE], 2L, cu[b_vec] * offdiag, `*`) +
             sweep(ew[, b_vec, drop = FALSE], 2L, h[a_vec] * offdiag, `*`) -
             sweep(ew[, a_vec, drop = FALSE], 2L, cb_x[b_vec] * offdiag, `*`)
-          j_slopes_s <- solve(amat, m)
+          j_slopes_s <- lav_matrix_symmetric_solve_spd(amat, m)
         }
 
         # fill in k_mat_int and k_mat
