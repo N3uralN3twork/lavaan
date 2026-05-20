@@ -473,24 +473,72 @@ lav_utils_wls_linearization <- function(delta = NULL, s = NULL,
 # function to transform names of variables to snake_case
 # this function is used mainly to rename function arguments given in a list
 #     where 'old' names are still accepted to avoid breaking other packages
+lav_snake_case_map <- c(
+  "B" = "m_b", "C" = "m_c", "D" = "m_d", "E" = "m_e",
+  "K" = "m_k", "W" = "m_w", "PI" = "pi0", "TAU" = "mm_tau",
+  "DELTA" = "mm_delta", "NU" = "mm_nu", "LAMBDA" = "mm_lambda",
+  "eXo" = "exo", "WMAT" = "mm_wmat", "THETA" = "mm_theta",
+  "ALPHA" = "mm_alpha", "BETA" = "mm_beta", "GAMMA" = "mm_gamma",
+  "PSI" = "mm_psi", "SminTheta" = "s_min_theta"
+)
+lav_snake_case_map_names <- names(lav_snake_case_map)
+
 lav_snake_case <- function(old_names) {
-  curval <- c("B", "C", "D", "E", "K", "W", "PI",
-             "TAU", "DELTA", "NU", "LAMBDA", "eXo",
-              "WMAT", "THETA", "ALPHA", "BETA", "GAMMA", "PSI",
-              "SminTheta")
-  newval <- c("m_b", "m_c", "m_d", "m_e", "m_k", "m_w", "pi0",
-             "mm_tau", "mm_delta", "mm_nu", "mm_lambda", "exo",
-             "mm_wmat", "mm_theta", "mm_alpha", "mm_beta", "mm_gamma", "mm_psi",
-             "s_min_theta")
-  # transform dot.case and CamelCase to snake_case
-  varnames_new <- tolower(chartr(".", "_",
-                   gsub("([a-z])([A-Z])", "\\1_\\2", old_names)))
-  # apply standard modifications
-  mtch <- match(old_names, curval)
-  for (j in seq_along(old_names)) {
-    if (!is.na(mtch[j])) varnames_new[j] <- newval[mtch[j]]
+  if (is.null(old_names)) {
+    return(character(0L))
+  } else if (!is.character(old_names)) {
+    old_names_names <- names(old_names)
+    old_names <- as.character(old_names)
+    names(old_names) <- old_names_names
   }
-  # remove trailing underscores in new names
-  varnames_new <- gsub("_$", "", varnames_new)
+  mtch <- match(old_names, lav_snake_case_map_names)
+  hit <- !is.na(mtch)
+  varnames_new <- old_names
+
+  if (length(old_names) <= 16L && any(hit)) {
+    varnames_new <- tolower(chartr(".", "_",
+                     gsub("([a-z])([A-Z])", "\\1_\\2", old_names)))
+    varnames_new <- sub("_$", "", varnames_new)
+    varnames_new[hit] <- unname(lav_snake_case_map[mtch[hit]])
+    return(varnames_new)
+  }
+
+  if (any(!hit)) {
+    todo <- which(!hit)
+    x <- old_names[todo]
+    needs_work <- grepl("[[:upper:].]|_$", x)
+
+    if (any(needs_work, na.rm = TRUE)) {
+      if (length(old_names) <= 16L) {
+        varnames_new[todo] <- tolower(chartr(".", "_",
+                              gsub("([a-z])([A-Z])", "\\1_\\2", x)))
+        varnames_new[todo] <- sub("_$", "", varnames_new[todo])
+      } else {
+        # transform dot.case and CamelCase to snake_case
+        needs_case <- grepl("[[:upper:].]", x)
+        if (any(needs_case, na.rm = TRUE)) {
+          idx <- todo[which(needs_case)]
+          varnames_new[idx] <- tolower(chartr(".", "_",
+                               gsub("([a-z])([A-Z])", "\\1_\\2",
+                                 old_names[idx]
+                               )))
+        }
+
+        # remove trailing underscores in new names
+        needs_trim <- endsWith(varnames_new[todo], "_")
+        if (any(needs_trim, na.rm = TRUE)) {
+          idx <- todo[which(needs_trim)]
+          varnames_new[idx] <- substr(varnames_new[idx], 1L,
+            nchar(varnames_new[idx]) - 1L
+          )
+        }
+      }
+    }
+  }
+
+  # apply standard modifications
+  if (any(hit)) {
+    varnames_new[hit] <- unname(lav_snake_case_map[mtch[hit]])
+  }
   varnames_new
 }
