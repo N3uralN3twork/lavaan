@@ -24,45 +24,53 @@ lavNames <- lav_object_vnames    # synonym #nolint
 
 lav_partable_vnames_cached_block_select <- function(partable, dotdotdot) {
   dot_names <- names(dotdotdot)
+  allowed_names <- c("block", "group", "level")
+
   if (is.null(dot_names) ||
       any(!nzchar(dot_names)) ||
-      !all(dot_names %in% c("block", "group", "level"))) {
+      anyNA(match(dot_names, allowed_names))) {
     return(NULL)
   }
 
-  if (is.null(partable$block)) {
-    partable_block <- rep(1L, length(partable$lhs))
-  } else {
-    partable_block <- partable$block
+  partable_block <- partable$block
+  if (is.null(partable_block)) {
+    partable_block <- rep.int(1L, length(partable$lhs))
   }
+
   valid_row <- partable_block > 0L &
-    !partable$op %in% c("==", "<", ">", ":=")
+    is.na(match(partable$op, c("==", "<", ">", ":=")))
+
   block_select <- attr(partable, "block.values", exact = TRUE)
   if (is.null(block_select)) {
-    block_select <- unique(na.omit(partable_block[valid_row]))
+    block_select <- partable_block[valid_row]
+    block_select <- unique(block_select[!is.na(block_select)])
   }
-  if (length(block_select) == 0L) {
+
+  if (!length(block_select)) {
     lav_msg_warn(gettext("no blocks selected."))
     return(block_select)
   }
 
   block_row <- match(block_select, partable_block)
+
   for (dot in seq_along(dotdotdot)) {
     block_var <- dot_names[dot]
     block_val <- dotdotdot[[dot]]
 
     if (block_var == "block") {
-      if (!all(block_val %in% partable_block)) {
+      if (anyNA(match(block_val, partable_block))) {
         lav_msg_stop(gettextf(
           "%1$s column does not contain value `%2$s'", block_var, block_val))
       }
-      block_select <- block_select[block_select %in% block_val]
-      block_row <- match(block_select, partable_block)
+
+      keep <- block_select %in% block_val
+      block_select <- block_select[keep]
+      block_row <- block_row[keep]
       next
     }
 
     block_var_values <- partable[[block_var]]
-    if (is.null(block_var_values) || length(block_var_values) == 0L) {
+    if (is.null(block_var_values) || !length(block_var_values)) {
       if (block_var == "group" &&
           length(block_val) == 1L &&
           !is.na(block_val) &&
@@ -71,18 +79,21 @@ lav_partable_vnames_cached_block_select <- function(partable, dotdotdot) {
       }
       return(NULL)
     }
-    if (!all(block_val %in% block_var_values)) {
+
+    if (anyNA(match(block_val, block_var_values))) {
       lav_msg_stop(gettextf(
         "%1$s column does not contain value `%2$s'", block_var, block_val))
     }
 
-    block_select <- block_select[block_var_values[block_row] %in% block_val]
-    block_row <- match(block_select, partable_block)
+    keep <- block_var_values[block_row] %in% block_val
+    block_select <- block_select[keep]
+    block_row <- block_row[keep]
   }
 
-  if (length(block_select) == 0L) {
+  if (!length(block_select)) {
     lav_msg_warn(gettext("no blocks selected."))
   }
+
   block_select
 }
 

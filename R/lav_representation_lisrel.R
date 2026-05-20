@@ -1395,6 +1395,53 @@ lav_lisrel_theta <- function(mlist = NULL,
 #  4. BETA is a DAG in any order    -> Kahn topological sort, permute to
 #                                      lower tri, forwardsolve, unpermute
 #  5. BETA has directed cycles      -> general solve()
+lav_lisrel_beta_dag_order <- function(beta_pattern = NULL) {
+  nr <- nrow(beta_pattern)
+  if (nr == 0L || !any(beta_pattern)) {
+    return(NULL)
+  }
+
+  # The direct triangular branches in lav_lisrel_ibinv() are cheaper.
+  if (all(!beta_pattern[upper.tri(beta_pattern)]) ||
+      all(!beta_pattern[lower.tri(beta_pattern)])) {
+    return(NULL)
+  }
+
+  indegree <- rowSums(beta_pattern)
+  result <- integer(nr)
+  queue <- integer(nr)
+  queue_len <- 0L
+  zero_indegree <- which(indegree == 0L)
+  if (length(zero_indegree) > 0L) {
+    queue[seq_along(zero_indegree)] <- zero_indegree
+    queue_len <- length(zero_indegree)
+  }
+
+  k <- 0L
+  queue_pos <- 1L
+  while (queue_pos <= queue_len) {
+    v <- queue[queue_pos]
+    queue_pos <- queue_pos + 1L
+    k <- k + 1L
+    result[k] <- v
+
+    children <- which(beta_pattern[, v])
+    for (u in children) {
+      indegree[u] <- indegree[u] - 1L
+      if (indegree[u] == 0L) {
+        queue_len <- queue_len + 1L
+        queue[queue_len] <- u
+      }
+    }
+  }
+
+  if (k != nr) {
+    return(NULL)
+  }
+
+  list(order = result, inv_order = order(result))
+}
+
 lav_lisrel_ibinv <- function(mlist = NULL) {
   mm_beta <- mlist$beta
   nr   <- nrow(mlist$psi)
@@ -1411,14 +1458,26 @@ lav_lisrel_ibinv <- function(mlist = NULL) {
     return(solve(tmp))
   }
 
+  dag_order <- attr(mm_beta, "ibinv.dag.order", exact = TRUE)
+  if (!is.null(dag_order) && length(dag_order$order) == nr) {
+    unit <- diag(nr)
+    ib_inv <- forwardsolve(
+      unit - mm_beta[dag_order$order, dag_order$order],
+      unit
+    )
+    return(ib_inv[dag_order$inv_order, dag_order$inv_order])
+  }
+
   # case 2: strictly lower triangular
   if (all(mm_beta[upper.tri(mm_beta)] == 0)) {
-    return(forwardsolve(diag(nr) - mm_beta, diag(nr)))
+    unit <- diag(nr)
+    return(forwardsolve(unit - mm_beta, unit))
   }
 
   # case 3: strictly upper triangular
   if (all(mm_beta[lower.tri(mm_beta)] == 0)) {
-    return(backsolve(diag(nr) - mm_beta, diag(nr)))
+    unit <- diag(nr)
+    return(backsolve(unit - mm_beta, unit))
   }
 
   # case 4: recursive/DAG
@@ -1439,7 +1498,8 @@ lav_lisrel_ibinv <- function(mlist = NULL) {
   }
   if (k == nr) {
     # recursive model: permute B to strictly lower triangular, solve, unpermute
-    ib_inv <- forwardsolve(diag(nr) - mm_beta[result, result], diag(nr))
+    unit <- diag(nr)
+    ib_inv <- forwardsolve(unit - mm_beta[result, result], unit)
     inv_order <- order(result)
     return(ib_inv[inv_order, inv_order])
   }
@@ -1938,48 +1998,55 @@ lav_lisrel_df_dmlist <- function(mlist = NULL, omega = NULL, omega_mu = NULL) {
   if (!is.null(mlist$gw)) group_w_free <- TRUE
 
   # pre-compute some values
-  t_lambda__ib_inv <- t(lambda__ib_inv)
+  omega__lambda__ib_inv <- omega %*% lambda__ib_inv
   if (!is.null(mm_beta)) {
     omega__lambda__ib_inv__psi__t_ib_inv <-                 # nolint
-      (omega %*% lambda__ib_inv %*% mm_psi %*% t(ib_inv))
+      tcrossprod(omega__lambda__ib_inv %*% mm_psi, ib_inv)
   } else {
-    omega__lambda <- omega %*% mm_lambda
+    omega__lambda <- omega__lambda__ib_inv
   }
 
   # 1. LAMBDA
   if (!is.null(mm_beta)) {
+
     if (meanstructure) {
-      lambda_deriv <- -1.0 * (omega_mu %*% t(mm_alpha) %*% t(ib_inv) +
-        omega__lambda__ib_inv__psi__t_ib_inv)
+      alpha_beta <- ib_inv %*% mm_alpha
+
+      lambda_deriv <- -(
+        omega__lambda__ib_inv__psi__t_ib_inv +
+          tcrossprod(omega_mu, alpha_beta)
+      )
     } else {
-      lambda_deriv <- -1.0 * omega__lambda__ib_inv__psi__t_ib_inv
+      lambda_deriv <- -omega__lambda__ib_inv__psi__t_ib_inv
     }
+
   } else {
-    # no BETA
+
+    lambda_base <- omega__lambda %*% mm_psi
+
     if (meanstructure) {
-      lambda_deriv <- -1.0 * (omega_mu %*% t(mm_alpha) +
-        omega__lambda %*% mm_psi)
-    } else {
-      lambda_deriv <- -1.0 * (omega__lambda %*% mm_psi)
+      lambda_base <- lambda_base + tcrossprod(omega_mu, mm_alpha)
     }
+
+    lambda_deriv <- -1.0 * lambda_base
   }
 
   # 2. BETA
   if (!is.null(mm_beta)) {
     if (meanstructure) {
-      beta_deriv <- -1.0 * ((t(ib_inv) %*%
-        (t(mm_lambda) %*% omega_mu %*% t(mm_alpha)) %*%
-        t(ib_inv)) +
-        (t_lambda__ib_inv %*%
-          omega__lambda__ib_inv__psi__t_ib_inv))
+      lambda__omega_mu__t_alpha <-
+        tcrossprod(crossprod(mm_lambda, omega_mu), mm_alpha)
+      beta_deriv <- -1.0 * (crossprod(ib_inv,
+        tcrossprod(lambda__omega_mu__t_alpha, ib_inv)) +
+        crossprod(lambda__ib_inv, omega__lambda__ib_inv__psi__t_ib_inv))
     } else {
-      beta_deriv <- -1.0 * (t_lambda__ib_inv %*%
-        omega__lambda__ib_inv__psi__t_ib_inv)
+      beta_deriv <- -1.0 *
+        crossprod(lambda__ib_inv, omega__lambda__ib_inv__psi__t_ib_inv)
     }
   }
 
   # 3. PSI
-  psi_deriv <- -1.0 * (t_lambda__ib_inv %*% omega %*% lambda__ib_inv)
+  psi_deriv <- -1.0 * crossprod(lambda__ib_inv, omega__lambda__ib_inv)
   diag(psi_deriv) <- 0.5 * diag(psi_deriv)
 
   # 4. THETA
@@ -1991,7 +2058,7 @@ lav_lisrel_df_dmlist <- function(mlist = NULL, omega = NULL, omega_mu = NULL) {
     nu_deriv <- -1.0 * omega_mu
 
     # 6. ALPHA
-    alpha_deriv <- -1.0 * t(t(omega_mu) %*% lambda__ib_inv)
+    alpha_deriv <- -1.0 * crossprod(lambda__ib_inv, omega_mu)
   }
 
   if (group_w_free) {
@@ -2230,7 +2297,6 @@ lav_lisrel_dmu_dx <- function(mlist = NULL,
 # dTh/dx -- per model matrix
 lav_lisrel_dth_dx <- function(mlist = NULL,
                               m = "tau",
-                              # all model matrix elements, or only a few?
                               idx = seq_along(mlist[[m]]),
                               th_idx = NULL,
                               delta = TRUE) {
@@ -2240,94 +2306,136 @@ lav_lisrel_dth_dx <- function(mlist = NULL,
   mm_tau <- mlist$tau
   nth <- nrow(mm_tau)
 
-  # missing alpha
-  if (is.null(mlist$alpha)) {
-    mm_alpha <- matrix(0, nfac, 1L)
-  } else {
-    mm_alpha <- mlist$alpha
-  }
-
-  # missing nu
-  if (is.null(mlist$nu)) {
-    mm_nu <- matrix(0, nvar, 1L)
-  } else {
-    mm_nu <- mlist$nu
-  }
-
-  # Delta?
-  delta_flag <- FALSE
-  if (delta && !is.null(mlist$delta)) {
-    mm_delta <- mlist$delta
-    delta_flag <- TRUE
-  }
-
   if (is.null(th_idx)) {
     th_idx <- seq_len(nth)
-    nlev <- rep(1L, nvar)
-    k_nu <- diag(nvar)
+    nlev <- rep.int(1L, nvar)
   } else {
     nlev <- tabulate(th_idx, nbins = nvar)
     nlev[nlev == 0L] <- 1L
-    k_nu <- matrix(0, sum(nlev), nvar)
-    k_nu[cbind(seq_len(sum(nlev)), rep(seq_len(nvar), times = nlev))] <- 1.0
   }
 
-  # shortcut for empty matrices
-  if (m == "gamma" || m == "psi" || m == "theta" || m == "gw" ||
-    m == "cov.x" || m == "mean.x") {
-    return(matrix(0.0, nrow = length(th_idx), ncol = length(idx)))
+  row_index <- rep(seq_len(nvar), times = nlev)
+  nr <- length(row_index)
+  ni <- length(idx)
+
+  if (m %in% c("gamma", "psi", "theta", "gw", "cov.x", "mean.x")) {
+    return(matrix(0.0, nrow = length(th_idx), ncol = ni))
   }
 
-  # beta?
-  if (!is.null(mlist$ibeta.inv)) {
-    ib_inv <- mlist$ibeta.inv
-  } else {
-    ib_inv <- lav_lisrel_ibinv(mlist = mlist)
+  delta_vec <- NULL
+  if (delta && !is.null(mlist$delta)) {
+    delta_vec <- as.vector(mlist$delta[row_index, , drop = FALSE])
+  }
+
+  apply_delta <- function(dx) {
+    if (is.null(delta_vec)) dx else dx * delta_vec
+  }
+
+  ib_inv <- NULL
+  get_ib <- function() {
+    if (is.null(ib_inv)) {
+      ib_inv <<- if (!is.null(mlist$ibeta.inv)) {
+        mlist$ibeta.inv
+      } else {
+        lav_lisrel_ibinv(mlist = mlist)
+      }
+    }
+    ib_inv
+  }
+
+  get_alpha <- function() {
+    if (is.null(mlist$alpha)) {
+      matrix(0.0, nfac, 1L)
+    } else {
+      mlist$alpha
+    }
   }
 
   if (m == "tau") {
-    dx <- matrix(0, nrow = length(th_idx), ncol = nth)
-    dx[th_idx > 0L, ] <- diag(nth)
-    if (delta_flag) {
-      dx <- dx * as.vector(k_nu %*% mm_delta)
+    dx <- matrix(0.0, nrow = length(th_idx), ncol = ni)
+
+    if (ni > 0L) {
+      pos <- which(th_idx > 0L)
+      dx[cbind(pos[idx], seq_len(ni))] <- 1.0
     }
-  } else if (m == "nu") {
-    dx <- (-1) * k_nu
-    if (delta_flag) {
-      dx <- dx * as.vector(k_nu %*% mm_delta)
-    }
-  } else if (m == "lambda") {
-    dx <- (-1) * t(ib_inv %*% mm_alpha) %x% diag(nvar)
-    dx <- k_nu %*% dx
-    if (delta_flag) {
-      dx <- dx * as.vector(k_nu %*% mm_delta)
-    }
-  } else if (m == "beta") {
-    dx <- (-1) * t(ib_inv %*% mm_alpha) %x% (mm_lambda %*% ib_inv)
-    # this is not really needed (because we select idx=m.el.idx)
-    dx[, lav_matrix_diag_idx(nfac)] <- 0.0
-    dx <- k_nu %*% dx
-    if (delta_flag) {
-      dx <- dx * as.vector(k_nu %*% mm_delta)
-    }
-  } else if (m == "alpha") {
-    dx <- (-1) * mm_lambda %*% ib_inv
-    dx <- k_nu %*% dx
-    if (delta_flag) {
-      dx <- dx * as.vector(k_nu %*% mm_delta)
-    }
-  } else if (m == "delta") {
-    dx1 <- matrix(0, nrow = length(th_idx), ncol = 1)
-    dx1[th_idx > 0L, ] <- mm_tau
-    dx2 <- mm_nu + mm_lambda %*% ib_inv %*% mm_alpha
-    dx2 <- k_nu %*% dx2
-    dx <- k_nu * as.vector(dx1 - dx2)
-  } else {
-    lav_msg_stop(gettext("wrong model matrix names:"), m)
+
+    return(apply_delta(dx))
   }
 
-  dx <- dx[, idx, drop = FALSE]
-  dx
+  if (m == "nu") {
+    dx <- matrix(0.0, nrow = nr, ncol = ni)
+
+    for (j in seq_len(ni)) {
+      dx[row_index == idx[j], j] <- -1.0
+    }
+
+    return(apply_delta(dx))
+  }
+
+  if (m == "lambda") {
+    alpha_beta <- as.vector(get_ib() %*% get_alpha())
+
+    lambda_row <- ((idx - 1L) %% nvar) + 1L
+    lambda_col <- ((idx - 1L) %/% nvar) + 1L
+
+    dx <- matrix(0.0, nrow = nr, ncol = ni)
+
+    for (j in seq_len(ni)) {
+      dx[row_index == lambda_row[j], j] <- -alpha_beta[lambda_col[j]]
+    }
+
+    return(apply_delta(dx))
+  }
+
+  if (m == "beta") {
+    alpha_beta <- as.vector(get_ib() %*% get_alpha())
+    lambda_ib <- mm_lambda %*% get_ib()
+
+    beta_row <- ((idx - 1L) %% nfac) + 1L
+    beta_col <- ((idx - 1L) %/% nfac) + 1L
+
+    dx <- -lambda_ib[row_index, beta_row, drop = FALSE] *
+      rep(alpha_beta[beta_col], each = nr)
+
+    dx[, beta_row == beta_col] <- 0.0
+
+    return(apply_delta(dx))
+  }
+
+  if (m == "alpha") {
+    dx <- -(mm_lambda %*% get_ib()[, idx, drop = FALSE])
+    dx <- dx[row_index, , drop = FALSE]
+
+    return(apply_delta(dx))
+  }
+
+  if (m == "delta") {
+    mm_nu <- if (is.null(mlist$nu)) {
+      numeric(nvar)
+    } else {
+      as.vector(mlist$nu)
+    }
+
+    if (!is.null(mlist$alpha)) {
+      mm_nu <- mm_nu + as.vector(mm_lambda %*% get_ib() %*% mlist$alpha)
+    }
+
+    tau_vec <- numeric(nr)
+    tau_vec[th_idx > 0L] <- as.vector(mm_tau)
+
+    scale <- tau_vec - mm_nu[row_index]
+
+    dx <- matrix(0.0, nrow = nr, ncol = ni)
+
+    for (j in seq_len(ni)) {
+      rows <- row_index == idx[j]
+      dx[rows, j] <- scale[rows]
+    }
+
+    return(dx)
+  }
+
+  lav_msg_stop(gettext("wrong model matrix names:"), m)
 }
 
 # dPi/dx -- per model matrix
