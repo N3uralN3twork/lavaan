@@ -18,6 +18,28 @@
 #' @return Logical indicating if this is an FMG test
 #' @keywords internal
 lav_test_fmg_is_fmg <- function(test) {
+  if (length(test) == 1L) {
+    test <- tolower(test)
+    if (is.na(test)) {
+      return(FALSE)
+    }
+    if (identical(test, "all")) {
+      return(TRUE)
+    }
+    prefix3 <- substr(test, 1L, 3L)
+    if (prefix3 == "fmg") {
+      return(nchar(test) == 3L || substr(test, 4L, 4L) == "_")
+    }
+    if (prefix3 %in% c("sb_", "ss_", "sf_")) {
+      return(TRUE)
+    }
+    prefix4 <- substr(test, 1L, 4L)
+    if (prefix4 %in% c("peba", "pols", "pall", "all_", "std_")) {
+      return(TRUE)
+    }
+    return(FALSE)
+  }
+
   test <- tolower(test)
   patterns <- c(
     "^fmg($|_)", "^peba", "^pols", "^pall", "^all$",

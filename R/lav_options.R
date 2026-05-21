@@ -41,7 +41,11 @@ lav_options_checkvalues <- function(optname, optvalue, chr) {
   if (any(optvalid == "empty.string")) {
     optvalid[optvalid == "empty.string"] <- ""
   }
-  optvals <- gsub("[_-]", ".", tolower(optvalue))
+  optvals <- tolower(optvalue)
+  if (any(grepl("_", optvals, fixed = TRUE)) ||
+    any(grepl("-", optvals, fixed = TRUE))) {
+    optvals <- chartr("_-", "..", optvals)
+  }
   optvalsok <- match(optvals, optvalid)
   if (any(is.na(optvalsok))) {
     lav_msg_stop(sprintf(
