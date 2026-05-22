@@ -99,14 +99,18 @@ lav_mvnorm_missing_loglik_samplestats <- function(yp = NULL, # nolint
   # for each pattern, compute sigma.inv/logdet; compute DIST for all
   # observations of this pattern
   for (p in seq_len(pat_n)) {
+    yp_p <- yp[[p]]
+
     # observed variables for this pattern
-    var_idx <- yp[[p]]$var.idx
+    var_idx <- yp_p$var.idx
 
     # missing values for this pattern
     na_idx <- which(!var_idx)
 
+    freq <- yp_p$freq
+
     # constant
-    p_log_2pi[p] <- sum(var_idx) * log_2pi * yp[[p]]$freq
+    p_log_2pi[p] <- sum(var_idx) * log_2pi * freq
 
     # invert Sigma for this pattern
     if (length(na_idx) > 0L) {
@@ -114,14 +118,15 @@ lav_mvnorm_missing_loglik_samplestats <- function(yp = NULL, # nolint
         s_inv = sigma_inv_1,
         rm_idx = na_idx, logdet = TRUE, s_logdet = sigma_logdet
       )
-      logdet[p] <- attr(sigma_inv, "logdet") * yp[[p]]$freq
+      logdet[p] <- attr(sigma_inv, "logdet") * freq
     } else {
       sigma_inv <- sigma_inv_1
-      logdet[p] <- sigma_logdet * yp[[p]]$freq
+      logdet[p] <- sigma_logdet * freq
     }
 
-    tt <- yp[[p]]$SY + tcrossprod(yp[[p]]$MY - mu[var_idx])
-    dist_1[p] <- sum(sigma_inv * tt) * yp[[p]]$freq
+    diff_1 <- yp_p$MY - mu[var_idx]
+    dist_1[p] <- (sum(sigma_inv * yp_p$SY) +
+      sum(as.numeric(crossprod(diff_1, sigma_inv)) * diff_1)) * freq
   }
 
   # loglikelihood all data
@@ -285,8 +290,8 @@ lav_mvnorm_missing_llik_pattern <- function(y = NULL,   # nolint
   # subtract Mu
   yc <- t(t(y) - mu)
 
-  # DIST/logdet per case
-  dist_1 <- logdet <- p_log_2pi <- rep(as.numeric(NA), ny)
+  # casewise loglikelihoods
+  llik <- rep(as.numeric(NA), ny)
 
   # missing patterns
   if (is.null(mp)) {
@@ -305,36 +310,30 @@ lav_mvnorm_missing_llik_pattern <- function(y = NULL,   # nolint
     # identify cases with this pattern
     case_idx <- mp$case.idx[[p]]
 
-    # constant
-    p_log_2pi[case_idx] <- sum(var_idx) * log_2pi
-
     # invert Sigma for this pattern
     if (length(na_idx) > 0L) {
       sigma_inv <- lav_matrix_symmetric_inverse_update(
         s_inv = sigma_inv_1,
         rm_idx = na_idx, logdet = TRUE, s_logdet = sigma_logdet
       )
-      logdet[case_idx] <- attr(sigma_inv, "logdet")
+      local_logdet <- attr(sigma_inv, "logdet")
     } else {
       sigma_inv <- sigma_inv_1
-      logdet[case_idx] <- sigma_logdet
+      local_logdet <- sigma_logdet
     }
 
+    y_p <- yc[case_idx, var_idx, drop = FALSE]
     if (mp$freq[p] == 1L) {
-      dist_1[case_idx] <- sum(sigma_inv *
-        crossprod(yc[case_idx, var_idx, drop = FALSE]))
+      dist_1 <- sum(sigma_inv * crossprod(y_p))
     } else {
-      dist_1[case_idx] <-
-        rowSums(yc[case_idx, var_idx, drop = FALSE] %*% sigma_inv *
-          yc[case_idx, var_idx, drop = FALSE])
+      dist_1 <- rowSums((y_p %*% sigma_inv) * y_p)
     }
-  }
 
-  # compute casewise loglikelihoods
-  if (log2pi) {
-    llik <- -(p_log_2pi + logdet + dist_1) / 2
-  } else {
-    llik <- -(logdet + dist_1) / 2
+    if (log2pi) {
+      llik[case_idx] <- -(sum(var_idx) * log_2pi + local_logdet + dist_1) / 2
+    } else {
+      llik[case_idx] <- -(local_logdet + dist_1) / 2
+    }
   }
 
   # minus.two
