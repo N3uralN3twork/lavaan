@@ -323,6 +323,13 @@ lav_model_estimate <- function(lavmodel = NULL,
     lavdata@nlevels == 1L &&
     !lavmodel@categorical &&
     lavsamplestats@ridge <= 0.0
+  use_fast_ml_objective <- share_implied &&
+    !lavmodel@meanstructure &&
+    !lavsamplestats@missing.flag &&
+    lavsamplestats@ngroups == 1L &&
+    !lavmodel@conditional.x &&
+    !lavmodel@group.w.free &&
+    length(lavsamplestats@cov) > 0L
 
   # function to be minimized
   objective_function <- function(x, verbose = FALSE, inf_to_max = FALSE,
@@ -339,14 +346,23 @@ lav_model_estimate <- function(lavmodel = NULL,
 
     state <- estimate_state(x)
 
-    fx <- lav_model_objective(
-      lavmodel = lavmodel,
-      glist = state$glist,
-      lavsamplestats = lavsamplestats,
-      lavdata = lavdata,
-      lavcache = lavcache,
-      implied = if (share_implied) state else NULL
-    )
+    if (use_fast_ml_objective) {
+      fx <- lav_model_objective_ml_single_group_fast(
+        lavmodel = lavmodel,
+        glist = state$glist,
+        lavsamplestats = lavsamplestats,
+        implied = state
+      )
+    } else {
+      fx <- lav_model_objective(
+        lavmodel = lavmodel,
+        glist = state$glist,
+        lavsamplestats = lavsamplestats,
+        lavdata = lavdata,
+        lavcache = lavcache,
+        implied = if (share_implied) state else NULL
+      )
+    }
 
     # only for PML: divide by N (to speed up convergence)
     if (estimator == "PML") {

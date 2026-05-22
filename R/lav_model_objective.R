@@ -1,5 +1,32 @@
 # model objective
 
+lav_model_objective_ml_single_group_fast <- function(lavmodel = NULL,
+                                                     glist = NULL,
+                                                     lavsamplestats = NULL,
+                                                     implied = NULL) {
+  implied_fast <- lav_model_implied_fast_state(
+    lavmodel = lavmodel,
+    glist = glist,
+    implied = implied,
+    need_sigma = TRUE,
+    need_mu = FALSE,
+    extra = TRUE
+  )
+
+  group_fx <- lav_model_objective_ml(
+    sigma_hat        = implied_fast$sigma[[1L]],
+    mu_hat           = NULL,
+    data_cov         = lavsamplestats@cov[[1L]],
+    data_mean        = NULL,
+    data_cov_log_det = lavsamplestats@cov.log.det[[1L]],
+    meanstructure    = FALSE
+  )
+  group_fx <- 0.5 * group_fx
+  fx <- group_fx
+  attr(fx, "fx.group") <- group_fx
+  fx
+}
+
 lav_model_objective <- function(lavmodel = NULL,
                                 glist = NULL,
                                 lavsamplestats = NULL,
