@@ -239,7 +239,7 @@ lav_mvnorm_loglik_samplestats <- function(sample_mean = NULL,
   log_2pi <- log(2 * pi)
 
   if (is.null(sigma_inv)) {
-    sigma_inv <- lav_matrix_symmetric_inverse(
+    sigma_inv <- lav_matrix_symmetric_inverse_chol_first(
       s = sigma_1, logdet = TRUE,
       sinv_method = sinv_method
     )

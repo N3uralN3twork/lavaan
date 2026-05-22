@@ -1200,6 +1200,25 @@ lav_matrix_symmetric_inverse <- function(s, logdet = FALSE,
   s_inv
 }
 
+lav_matrix_symmetric_inverse_chol_first <- function(s, logdet = FALSE,
+                                                    sinv_method = "eigen") {
+  c_s <- try(chol.default(s), silent = TRUE)
+  if (inherits(c_s, "try-error")) {
+    return(lav_matrix_symmetric_inverse(
+      s = s, logdet = logdet,
+      sinv_method = sinv_method
+    ))
+  }
+
+  s_inv <- chol2inv(c_s)
+  if (logdet) {
+    diag_c_s <- diag(c_s)
+    attr(s_inv, "logdet") <- 2 * sum(log(diag_c_s))
+  }
+
+  s_inv
+}
+
 # solve(A) %*% B, where A is symmetric, and B is vector of matrix
 lav_matrix_symmetric_solve_spd <- function(a, m_b, tol = 1e-10) {
   chol_a <- try(chol(a), silent = TRUE)

@@ -34,6 +34,39 @@
 
 # 1) likelihood
 
+lav_mvnorm_missing_prepare_samplestats <- function(yp = NULL) {
+  prepared <- attr(yp, "prepared", exact = TRUE)
+  if (!is.null(prepared)) {
+    return(prepared)
+  }
+
+  pat_n <- length(yp)
+  var_idx <- na_idx <- my <- sy <- vector("list", pat_n)
+  nvar <- integer(pat_n)
+  freq <- numeric(pat_n)
+
+  for (p in seq_len(pat_n)) {
+    yp_p <- yp[[p]]
+    var_idx[[p]] <- yp_p$var.idx
+    na_idx[[p]] <- which(!var_idx[[p]])
+    nvar[p] <- sum(var_idx[[p]])
+    freq[p] <- yp_p$freq
+    my[[p]] <- yp_p$MY
+    sy[[p]] <- yp_p$SY
+  }
+
+  list(
+    pat_n = pat_n,
+    p_1 = length(var_idx[[1L]]),
+    var.idx = var_idx,
+    na.idx = na_idx,
+    nvar = nvar,
+    freq = freq,
+    MY = my,
+    SY = sy
+  )
+}
+
 # 1a: input is raw data
 #  - two strategies: 1) using missing patterns (pattern = TRUE)
 #                    2) truly case per case    (pattern = FALSE)
@@ -83,11 +116,11 @@ lav_mvnorm_missing_loglik_samplestats <- function(yp = NULL, # nolint
                                                   log2pi = TRUE,
                                                   minus_two = FALSE) {
   log_2pi <- log(2 * pi)
-  pat_n <- length(yp)
-  p_1 <- length(yp[[1]]$var.idx)
+  yp_prepared <- lav_mvnorm_missing_prepare_samplestats(yp)
+  pat_n <- yp_prepared$pat_n
 
   # global inverse + logdet
-  sigma_inv_1 <- lav_matrix_symmetric_inverse(
+  sigma_inv_1 <- lav_matrix_symmetric_inverse_chol_first(
     s = sigma_1, logdet = TRUE,
     sinv_method = sinv_method
   )
@@ -99,18 +132,16 @@ lav_mvnorm_missing_loglik_samplestats <- function(yp = NULL, # nolint
   # for each pattern, compute sigma.inv/logdet; compute DIST for all
   # observations of this pattern
   for (p in seq_len(pat_n)) {
-    yp_p <- yp[[p]]
-
     # observed variables for this pattern
-    var_idx <- yp_p$var.idx
+    var_idx <- yp_prepared$var.idx[[p]]
 
     # missing values for this pattern
-    na_idx <- which(!var_idx)
+    na_idx <- yp_prepared$na.idx[[p]]
 
-    freq <- yp_p$freq
+    freq <- yp_prepared$freq[p]
 
     # constant
-    p_log_2pi[p] <- sum(var_idx) * log_2pi * freq
+    p_log_2pi[p] <- yp_prepared$nvar[p] * log_2pi * freq
 
     # invert Sigma for this pattern
     if (length(na_idx) > 0L) {
@@ -124,8 +155,8 @@ lav_mvnorm_missing_loglik_samplestats <- function(yp = NULL, # nolint
       logdet[p] <- sigma_logdet * freq
     }
 
-    diff_1 <- yp_p$MY - mu[var_idx]
-    dist_1[p] <- (sum(sigma_inv * yp_p$SY) +
+    diff_1 <- yp_prepared$MY[[p]] - mu[var_idx]
+    dist_1[p] <- (sum(sigma_inv * yp_prepared$SY[[p]]) +
       sum(as.numeric(crossprod(diff_1, sigma_inv)) * diff_1)) * freq
   }
 
@@ -390,8 +421,9 @@ lav_mvnorm_missing_dlogl_dmu_samplestats <- function(yp = NULL, # nolint
                                                      x_idx = integer(0L),
                                                      sigma_inv = NULL,
                                                      sinv_method = "eigen") {
-  pat_n <- length(yp)
-  p_1 <- length(yp[[1]]$var.idx)
+  yp_prepared <- lav_mvnorm_missing_prepare_samplestats(yp)
+  pat_n <- yp_prepared$pat_n
+  p_1 <- yp_prepared$p_1
 
   if (is.null(sigma_inv)) {
     sigma_inv <- lav_matrix_symmetric_inverse(
@@ -406,10 +438,10 @@ lav_mvnorm_missing_dlogl_dmu_samplestats <- function(yp = NULL, # nolint
   # for each pattern, compute sigma.inv
   for (p in seq_len(pat_n)) {
     # observed variables for this pattern
-    var_idx <- yp[[p]]$var.idx
+    var_idx <- yp_prepared$var.idx[[p]]
 
     # missing values for this pattern
-    na_idx <- which(!var_idx)
+    na_idx <- yp_prepared$na.idx[[p]]
 
     # invert Sigma for this pattern
     if (length(na_idx) > 0L) {
@@ -422,10 +454,12 @@ lav_mvnorm_missing_dlogl_dmu_samplestats <- function(yp = NULL, # nolint
     }
 
     # dmu for this pattern
-    dmu_pattern <- as.numeric(sigma_inv_1 %*% (yp[[p]]$MY - mu[var_idx]))
+    dmu_pattern <- as.numeric(
+      sigma_inv_1 %*% (yp_prepared$MY[[p]] - mu[var_idx])
+    )
 
     # update mu
-    dmu[var_idx] <- dmu[var_idx] + (dmu_pattern * yp[[p]]$freq)
+    dmu[var_idx] <- dmu[var_idx] + (dmu_pattern * yp_prepared$freq[p])
   }
 
   # fixed.x?
@@ -541,8 +575,9 @@ lav_mvnorm_missing_dlogl_dsigma_samplestats <- function(yp = NULL, # nolint
                                                         x_idx = integer(0L),
                                                         sigma_inv = NULL,
                                                         sinv_method = "eigen") {
-  pat_n <- length(yp)
-  p_1 <- length(yp[[1]]$var.idx)
+  yp_prepared <- lav_mvnorm_missing_prepare_samplestats(yp)
+  pat_n <- yp_prepared$pat_n
+  p_1 <- yp_prepared$p_1
 
   if (is.null(sigma_inv)) {
     # invert Sigma
@@ -558,10 +593,10 @@ lav_mvnorm_missing_dlogl_dsigma_samplestats <- function(yp = NULL, # nolint
   # for each pattern
   for (p in seq_len(pat_n)) {
     # observed variables for this pattern
-    var_idx <- yp[[p]]$var.idx
+    var_idx <- yp_prepared$var.idx[[p]]
 
     # missing values for this pattern
-    na_idx <- which(!var_idx)
+    na_idx <- yp_prepared$na.idx[[p]]
 
     # invert Sigma for this pattern
     if (length(na_idx) > 0L) {
@@ -573,7 +608,8 @@ lav_mvnorm_missing_dlogl_dsigma_samplestats <- function(yp = NULL, # nolint
       sigma_inv_1 <- sigma_inv
     }
 
-    w_tilde <- yp[[p]]$SY + tcrossprod(yp[[p]]$MY - mu[var_idx])
+    w_tilde <- yp_prepared$SY[[p]] +
+      tcrossprod(yp_prepared$MY[[p]] - mu[var_idx])
 
     # dSigma for this pattern
     d_sigma_pattern <- matrix(0, p_1, p_1)
@@ -581,7 +617,7 @@ lav_mvnorm_missing_dlogl_dsigma_samplestats <- function(yp = NULL, # nolint
       (sigma_inv_1 %*% w_tilde %*% sigma_inv_1))
 
     # update dSigma
-    d_sigma <- d_sigma + (d_sigma_pattern * yp[[p]]$freq)
+    d_sigma <- d_sigma + (d_sigma_pattern * yp_prepared$freq[p])
   }
 
   # fixed.x?
@@ -622,8 +658,9 @@ lav_mvnorm_missing_dlogl_dvechsigma_samplestats <- # nolint
            x_idx = integer(0L),
            sigma_inv = NULL,
            sinv_method = "eigen") {
-    pat_n <- length(yp)
-    p_1 <- length(yp[[1]]$var.idx)
+    yp_prepared <- lav_mvnorm_missing_prepare_samplestats(yp)
+    pat_n <- yp_prepared$pat_n
+    p_1 <- yp_prepared$p_1
 
     if (is.null(sigma_inv)) {
       # invert Sigma
@@ -639,10 +676,10 @@ lav_mvnorm_missing_dlogl_dvechsigma_samplestats <- # nolint
     # for each pattern
     for (p in seq_len(pat_n)) {
       # observed variables for this pattern
-      var_idx <- yp[[p]]$var.idx
+      var_idx <- yp_prepared$var.idx[[p]]
 
       # missing values for this pattern
-      na_idx <- which(!var_idx)
+      na_idx <- yp_prepared$na.idx[[p]]
 
       # invert Sigma for this pattern
       if (length(na_idx) > 0L) {
@@ -654,7 +691,8 @@ lav_mvnorm_missing_dlogl_dvechsigma_samplestats <- # nolint
         sigma_inv_1 <- sigma_inv
       }
 
-      w_tilde <- yp[[p]]$SY + tcrossprod(yp[[p]]$MY - mu[var_idx])
+      w_tilde <- yp_prepared$SY[[p]] +
+        tcrossprod(yp_prepared$MY[[p]] - mu[var_idx])
 
       # dSigma for this pattern
       d_sigma_pattern <- matrix(0, p_1, p_1)
@@ -672,7 +710,8 @@ lav_mvnorm_missing_dlogl_dvechsigma_samplestats <- # nolint
       ))
 
       # update dvechSigma
-      dvech_sigma <- dvech_sigma + (dvech_sigma_pattern * yp[[p]]$freq)
+      dvech_sigma <- dvech_sigma +
+        (dvech_sigma_pattern * yp_prepared$freq[p])
     }
 
     dvech_sigma
