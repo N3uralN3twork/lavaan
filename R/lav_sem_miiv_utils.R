@@ -681,7 +681,7 @@ lav_sem_miiv_utils_jaca_rls <- function(lavmodel = NULL,
       v_k <- as.vector(d_deltak %*% theta2)
       term2 <- minv_delta2t %*% d_w_e2_from_v(v_k)
 
-      jac_a[, k] <- iminus_a_inv %*% (term1 + term2)
+      jac_a[, k] <- IminusA_inv %*% (term1 + term2)
     }
   }
   jac_a

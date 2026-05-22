@@ -272,9 +272,9 @@ lav_data_simulate_old <- function( # user-specified model    # nolint start
 
   if (lav_debug()) {
     cat("\nModel-implied moments (before Vale-Maurelli):\n")
-    print(sigma_hat)
-    print(mu_hat)
-    if (exists("TH")) print(th)
+    print(Sigma.hat)
+    print(Mu.hat)
+    if (exists("TH")) print(TH)
   }
 
   # ngroups
@@ -285,7 +285,7 @@ lav_data_simulate_old <- function( # user-specified model    # nolint start
   # out <- vector("list", length = ngroups)
 
   for (g in 1:ngroups) {
-    cov_1 <- sigma_hat[[g]]
+    cov_1 <- Sigma.hat[[g]]
 
     # if empirical = TRUE, rescale by N/(N-1), so that estimator=ML
     # returns exact results
@@ -297,7 +297,7 @@ lav_data_simulate_old <- function( # user-specified model    # nolint start
     if (is.null(skewness) && is.null(kurtosis)) {
       x[[g]] <- lav_mvrnorm(
         n = sample.nobs[g],
-        mu = mu_hat[[g]],
+        mu = Mu.hat[[g]],
         sigma_1 = cov_1,
         empirical = empirical
       )
@@ -323,7 +323,7 @@ lav_data_simulate_old <- function( # user-specified model    # nolint start
       )[, , drop = FALSE]
 
       # then, we center
-      x[[g]] <- sweep(tmp, MARGIN = 2, STATS = mu_hat[[g]], FUN = "+")
+      x[[g]] <- sweep(tmp, MARGIN = 2, STATS = Mu.hat[[g]], FUN = "+")
     }
 
     # any categorical variables?
