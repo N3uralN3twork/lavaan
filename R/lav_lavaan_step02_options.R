@@ -153,7 +153,9 @@ lav_lavaan_step02_options <- function(slot_options = NULL, # nolint
           paste(tmp_ov_names_y[idx_missing], collapse = " ")
         )
       }
-      if (any(sapply(data[, tmp_ov_names_y], inherits, "ordered"))) {
+      if (any(vapply(tmp_ov_names_y, function(nm) {
+        inherits(data[[nm]], "ordered")
+      }, logical(1L)))) {
         opt$.categorical <- TRUE
       }
     }

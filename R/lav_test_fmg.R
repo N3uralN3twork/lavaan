@@ -19,11 +19,30 @@
 #' @keywords internal
 lav_test_fmg_is_fmg <- function(test) {
   test <- tolower(test)
-  patterns <- c(
-    "^fmg($|_)", "^peba", "^pols", "^pall", "^all$",
-    "^all_", "^sb_", "^ss_", "^sf_", "^std_"
-  )
-  any(vapply(patterns, function(p) grepl(p, test), logical(1)))
+  if (length(test) != 1L) {
+    patterns <- c(
+      "^fmg($|_)", "^peba", "^pols", "^pall", "^all$",
+      "^all_", "^sb_", "^ss_", "^sf_", "^std_"
+    )
+    return(any(vapply(patterns, function(p) grepl(p, test), logical(1))))
+  }
+  if (is.na(test)) {
+    return(FALSE)
+  }
+  if (test == "fmg" || test == "all") {
+    return(TRUE)
+  }
+  prefix4 <- substr(test, 1L, 4L)
+  if (prefix4 == "fmg_" ||
+      prefix4 == "peba" ||
+      prefix4 == "pols" ||
+      prefix4 == "pall" ||
+      prefix4 == "all_" ||
+      prefix4 == "std_") {
+    return(TRUE)
+  }
+  prefix3 <- substr(test, 1L, 3L)
+  prefix3 == "sb_" || prefix3 == "ss_" || prefix3 == "sf_"
 }
 
 lav_test_fmg_is_preset <- function(test) {

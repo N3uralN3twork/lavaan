@@ -453,10 +453,16 @@ lav_pml_object_inspect_gradient <-                  # nolint
   if (is.null(glist)) {
     glist <- object@GLIST
   }
-  sigma_hat <-
-    lav_model_sigma(object, glist = glist, extra = (estimator == "ML"))
-  mu_hat <- lav_model_mu(object, glist = glist)
-  th <- lav_model_th(object, glist = glist)
+  implied_fast <- lav_model_implied_fast(
+    lavmodel = object, glist = glist,
+    need_sigma = TRUE,
+    need_mu = TRUE,
+    need_th = TRUE,
+    extra = (estimator == "ML")
+  )
+  sigma_hat <- implied_fast$sigma
+  mu_hat <- implied_fast$mu
+  th <- implied_fast$th
   g <- 1
   d1 <- lav_pml_dploglik_dimplied(
     sigma_hat = sigma_hat[[g]], mu_hat = mu_hat[[g]],
@@ -566,9 +572,15 @@ lav_pml_model_vcov_firstorder <- function(lavmodel, lavsamplestats = NULL,
     x_el_idx = my_x_el_idx
   )
   #  }
-  sigma_hat <- lav_model_sigma(lavmodel)
-  mu_hat <- lav_model_mu(lavmodel)
-  th <- lav_model_th(lavmodel)
+  implied_fast <- lav_model_implied_fast(
+    lavmodel = lavmodel,
+    need_sigma = TRUE,
+    need_mu = TRUE,
+    need_th = TRUE
+  )
+  sigma_hat <- implied_fast$sigma
+  mu_hat <- implied_fast$mu
+  th <- implied_fast$th
   g <- 1
 
   sc <- lav_pml_dploglik_dimplied(

@@ -1879,6 +1879,8 @@ lav_samplestats_missing_patterns <- function(     # nolint
   #    attr(Yp, "Zp") <- Zp
   # }
 
+  attr(yp, "prepared") <- lav_mvnorm_missing_prepare_samplestats(yp)
+
   yp
 }
 

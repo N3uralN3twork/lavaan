@@ -5,6 +5,9 @@ lav_partable_attributes <- function(partable, pta = NULL) {
     pta <- attributes(partable)
     if (!is.null(pta$vnames) && !is.null(pta$nvar)) {
       # looks like a pta
+      if (is.null(pta$block.values)) {
+        pta$block.values <- lav_partable_block_values(partable)
+      }
       pta$ovda <- NULL
       return(pta)
     } else {
@@ -23,16 +26,16 @@ lav_partable_attributes <- function(partable, pta = NULL) {
     lapply(seq_len(nblocks), function(b) {
       if (v == "lv.marker") {
         match(pta$vnames[[v]][[b]], tmp_ov[[b]])
-      } else if (grepl("lv", v)) {
+      } else if (startsWith(v, "lv")) {
         match(pta$vnames[[v]][[b]], tmp_lv[[b]])
-      } else if (grepl("th", v)) {
+      } else if (startsWith(v, "th")) {
         # thresholds have '|t' pattern
         tmp_th <- sapply(strsplit(pta$vnames[[v]][[b]],
           "|t",
           fixed = TRUE
         ), "[[", 1L)
         match(tmp_th, tmp_ov[[b]])
-      } else if (grepl("eqs", v)) {
+      } else if (startsWith(v, "eqs")) {
         # mixture of tmp.ov/tmp.lv
         integer(0L)
       } else {
@@ -46,7 +49,8 @@ lav_partable_attributes <- function(partable, pta = NULL) {
   pta$meanstructure <- any(partable$op == "~1")
 
   # nblocks
-  pta$nblocks <- nblocks
+  pta$block.values <- lav_partable_block_values(partable)
+  pta$nblocks <- length(pta$block.values)
 
   # ngroups
   pta$ngroups <- lav_partable_ngroups(partable)

@@ -1,3 +1,19 @@
+lav_lavaan_step15_baseline_fast <- function(lavoptions = NULL,
+                                            lavsamplestats = NULL,
+                                            lavdata = NULL,
+                                            lavpartable = NULL,
+                                            lavh1 = NULL) {
+  context <- lav_lavaan_baseline_context(
+    lavoptions = lavoptions,
+    lavsamplestats = lavsamplestats,
+    lavdata = lavdata,
+    lavpartable = lavpartable,
+    lavh1 = lavh1
+  )
+
+  lav_lavaan_baseline_try_payloads(context)
+}
+
 lav_lavaan_step15_baseline <- function(lavoptions = NULL,
                                        lavsamplestats = NULL,
                                        lavdata = NULL,
@@ -22,8 +38,21 @@ lav_lavaan_step15_baseline <- function(lavoptions = NULL,
     if (lav_verbose()) {
       cat("lavbaseline ...")
     }
-  current_verbose <- lav_verbose()
-  lav_verbose(FALSE)
+    lavbaseline <- lav_lavaan_step15_baseline_fast(
+      lavoptions = lavoptions,
+      lavsamplestats = lavsamplestats,
+      lavdata = lavdata,
+      lavpartable = lavpartable,
+      lavh1 = lavh1
+    )
+    if (!is.null(lavbaseline)) {
+      if (lav_verbose()) {
+        cat(" done.\n")
+      }
+      return(lavbaseline)
+    }
+    current_verbose <- lav_verbose()
+    lav_verbose(FALSE)
     fit_indep <- try(lav_object_independence(
       object = NULL,
       lavsamplestats = lavsamplestats,
@@ -33,7 +62,7 @@ lav_lavaan_step15_baseline <- function(lavoptions = NULL,
       lavpartable = lavpartable,
       lavh1 = lavh1
     ), silent = TRUE)
-  lav_verbose(current_verbose)
+    lav_verbose(current_verbose)
     if (inherits(fit_indep, "try-error") || !fit_indep@optim$converged) {
       lav_msg_warn(gettext("estimation of the baseline model failed."))
       lavbaseline <- list()

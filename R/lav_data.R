@@ -832,8 +832,13 @@ lav_data_full <- function(data = NULL, # data.frame
   # check for perfect correlations (NOT including exo variables)
   if (!allow_single_case && any(ov$type == "numeric")) {
     num_idx <- which(ov$type == "numeric" & ov$exo == 0L)
-    cor_1 <- try(cor(data[, ov$idx[num_idx]], use = "pairwise.complete.obs"),
-               silent = TRUE)
+    numeric_data <- data[, ov$idx[num_idx], drop = FALSE]
+    cor_use <- if (anyNA(numeric_data)) {
+      "pairwise.complete.obs"
+    } else {
+      "everything"
+    }
+    cor_1 <- try(cor(numeric_data, use = cor_use), silent = TRUE)
     # replace any NAs by 0 (as we only wish to detect perfect correlations)
     cor_1[is.na(cor_1)] <- 0
     if (!inherits(cor_1, "try-error") &&

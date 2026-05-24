@@ -13,9 +13,18 @@ lav_model <- function(lavpartable = NULL,                          # nolint
                       lavoptions = NULL,
                       th_idx = list()) {
   # handle bare-minimum partables
-  lavpartable <- lav_partable_complete(lavpartable)
-  lavpta <- lav_partable_attributes(lavpartable)
-  lavpartable <- lav_partable_set_cache(lavpartable, lavpta)
+  complete_cached <- !is.null(attr(lavpartable, "vnames", exact = TRUE)) &&
+    !is.null(attr(lavpartable, "nvar", exact = TRUE)) &&
+    !is.null(lavpartable$id) &&
+    !is.null(lavpartable$start)
+  if (complete_cached) {
+    lavpta <- lav_partable_attributes(lavpartable)
+  } else {
+    lavpartable <- lav_partable_complete(lavpartable)
+    lavpta <- lav_partable_attributes(lavpartable)
+    lavpartable <- lav_partable_set_cache(lavpartable, lavpta)
+  }
+  lavpta_vnames <- lavpta$vnames
 
   # global info from user model
   nblocks <- lav_partable_nblocks(lavpartable)
@@ -83,10 +92,12 @@ lav_model <- function(lavpartable = NULL,                          # nolint
   }
 
   # select model matrices
-  if (lavoptions$representation == "LISREL") {
+  representation <- lavoptions$representation
+  conditional_x <- lavoptions$conditional.x
+  if (representation == "LISREL") {
     tmp_rep <- lav_lisrel(lavpartable, target = NULL, extra = TRUE,
                           allow_composites = composites)
-  } else if (lavoptions$representation == "RAM") {
+  } else if (representation == "RAM") {
     tmp_rep <- lav_ram(lavpartable, target = NULL, extra = TRUE)
   } else {
     lav_msg_stop(gettextf(
@@ -106,7 +117,7 @@ lav_model <- function(lavpartable = NULL,                          # nolint
       lavpartable$rhs[bad_idx[1]],
       sep = " "
     )
-    if (lavoptions$representation == "LISREL") {
+    if (representation == "LISREL") {
       lav_msg_stop(gettextf(
         "a model parameter is not defined in the LISREL representation %s.
         Upgrade to latent variables or consider using representation = 'RAM'.",
@@ -119,9 +130,20 @@ lav_model <- function(lavpartable = NULL,                          # nolint
   }
 
   # prepare nG-sized slots
-  tmp_ng <- sum(unlist(attr(tmp_rep, "mmNumber")))
+  mm_number_list <- attr(tmp_rep, "mmNumber", exact = TRUE)
+  mm_names_list <- attr(tmp_rep, "mmNames", exact = TRUE)
+  mm_symmetric_list <- attr(tmp_rep, "mmSymmetric", exact = TRUE)
+  mm_dim_names_list <- attr(tmp_rep, "mmDimNames", exact = TRUE)
+  mm_rows_list <- attr(tmp_rep, "mmRows", exact = TRUE)
+  mm_cols_list <- attr(tmp_rep, "mmCols", exact = TRUE)
+  ov_dummy_names_nox_list <- attr(tmp_rep, "ov.dummy.names.nox",
+    exact = TRUE)
+  ov_dummy_names_x_list <- attr(tmp_rep, "ov.dummy.names.x", exact = TRUE)
+  ov_idx_list <- attr(tmp_rep, "ov.idx", exact = TRUE)
+
+  tmp_ng <- sum(unlist(mm_number_list, use.names = FALSE))
   tmp_glist <- vector(mode = "list", tmp_ng)
-  names(tmp_glist) <- unlist(attr(tmp_rep, "mmNames"))
+  names(tmp_glist) <- unlist(mm_names_list, use.names = FALSE)
   dim_names <- vector(mode = "list", length = tmp_ng)
   is_symmetric <- logical(tmp_ng)
   mm_size <- integer(tmp_ng)
@@ -134,7 +156,8 @@ lav_model <- function(lavpartable = NULL,                          # nolint
 
   # prepare nblocks-sized slots
   nvar <- integer(nblocks)
-  nmat <- unlist(attr(tmp_rep, "mmNumber"))
+  nmat <- unlist(mm_number_list, use.names = FALSE)
+  mm_idx <- lav_model_group_mm_indices(nmat)
   num_idx <- vector("list", length = nblocks)
   nexo <- integer(nblocks)
   ov_x_dummy_ov_idx <- vector(mode = "list", length = nblocks)
@@ -144,29 +167,41 @@ lav_model <- function(lavpartable = NULL,                          # nolint
   ov_efa_idx <- vector(mode = "list", length = nblocks)
   lv_efa_idx <- vector(mode = "list", length = nblocks)
 
+  partable_block <- lavpartable$block
+  partable_free <- lavpartable$free
+  partable_start <- lavpartable$start
+  partable_id <- lavpartable$id
+  partable_lhs <- lavpartable$lhs
+  partable_rhs <- lavpartable$rhs
+  partable_op <- lavpartable$op
+  rep_mat <- tmp_rep$mat
+  rep_row <- tmp_rep$row
+  rep_col <- tmp_rep$col
+  if (nefa > 0L) {
+    partable_efa <- lavpartable$efa
+  }
+
   offset <- 0L
   # keep track of ov.names across blocks
-  for (g in 1:nblocks) {
+  for (g in seq_len(nblocks)) {
     # observed and latent variables for this block
-    ov_names <- lav_partable_vnames(lavpartable, "ov", block = g)
-    ov_names_nox <- lav_partable_vnames(lavpartable, "ov.nox", block = g)
-    ov_names_x <- lav_partable_vnames(lavpartable, "ov.x", block = g)
-    ov_num <- lav_partable_vnames(lavpartable, "ov.num", block = g)
-    if (lavoptions$conditional.x) {
+    ov_names <- lavpta_vnames$ov[[g]]
+    ov_names_nox <- lavpta_vnames$ov.nox[[g]]
+    ov_names_x <- lavpta_vnames$ov.x[[g]]
+    ov_num <- lavpta_vnames$ov.num[[g]]
+    if (conditional_x) {
       if (nlevels > 1L) {
         if (ngroups == 1L) {
-          other_block_names <- lav_partable_vnames(lavpartable, "ov",
-            block = seq_len(nblocks)[-g]
-          )
+          other_blocks <- seq_len(nblocks)[-g]
         } else {
           # TEST ME!
           # which group is this?
           this_group <- ceiling(g / nlevels)
           blocks_within_group <- (this_group - 1L) * nlevels + seq_len(nlevels)
-          other_block_names <- lav_partable_vnames(lavpartable, "ov",
-            block = blocks_within_group[-g]
-          )
+          other_blocks <- blocks_within_group[-g]
         }
+        other_block_names <- unlist(lavpta_vnames$ov[other_blocks],
+          use.names = FALSE)
 
 
         if (length(ov_names_x) > 0L) {
@@ -195,91 +230,92 @@ lav_model <- function(lavpartable = NULL,                          # nolint
     nexo[g] <- length(ov_names_x)
 
     if (nefa > 0L) {
-      lv_names <- lav_partable_vnames(lavpartable, "lv", block = g)
+      lv_names <- lavpta_vnames$lv[[g]]
     }
 
     # model matrices for this block
-    mm_number <- attr(tmp_rep, "mmNumber")[[g]]
-    mm_names <- attr(tmp_rep, "mmNames")[[g]]
-    mm_symmetric <- attr(tmp_rep, "mmSymmetric")[[g]]
-    mm_dim_names <- attr(tmp_rep, "mmDimNames")[[g]]
-    mm_rows <- attr(tmp_rep, "mmRows")[[g]]
-    mm_cols <- attr(tmp_rep, "mmCols")[[g]]
+    mm_number <- mm_number_list[[g]]
+    mm_names <- mm_names_list[[g]]
+    mm_symmetric <- mm_symmetric_list[[g]]
+    mm_dim_names <- mm_dim_names_list[[g]]
+    mm_rows <- mm_rows_list[[g]]
+    mm_cols <- mm_cols_list[[g]]
+    block_idx <- which(partable_block == g)
 
-    for (mm in 1:mm_number) {
+    for (mm in seq_len(mm_number)) {
       # offset in tmp.glist
       offset <- offset + 1L
 
       # matrix size, symmetric, dim.names
-      if (mm_symmetric[mm]) {
-        tmp_n <- mm_rows[mm]
-        mm_size <- as.integer(tmp_n * (tmp_n + 1) / 2)
+      mm_name <- mm_names[mm]
+      mm_row <- mm_rows[mm]
+      mm_col <- mm_cols[mm]
+      mm_is_symmetric <- mm_symmetric[mm]
+      if (mm_is_symmetric) {
+        tmp_n <- mm_row
+        this_mm_size <- as.integer(tmp_n * (tmp_n + 1) / 2)
       } else {
-        mm_size <- as.integer(mm_rows[mm] * mm_cols[mm])
+        this_mm_size <- as.integer(mm_row * mm_col)
       }
-      mm_size[offset] <- mm_size
-      is_symmetric[offset] <- mm_symmetric[mm]
+      mm_size[offset] <- this_mm_size
+      is_symmetric[offset] <- mm_is_symmetric
       dim_names[[offset]] <- mm_dim_names[[mm]]
 
       # select elements for this matrix
-      idx <- which(lavpartable$block == g & tmp_rep$mat == mm_names[mm])
-
-      # create empty `pattern' matrix
-      # FIXME: one day, we may want to use sparse matrices...
-      #        but they should not slow things down!
-      tmp <- matrix(0L,
-        nrow = mm_rows[mm],
-        ncol = mm_cols[mm]
-      )
+      idx <- block_idx[rep_mat[block_idx] == mm_name]
 
       # 1. first assign free values only, to get vector index
       #    -> to be used in lav_model_objective
-      tmp[cbind(tmp_rep$row[idx], tmp_rep$col[idx])] <- lavpartable$free[idx]
-      if (mm_symmetric[mm]) {
-        # NOTE: we assume everything is in the UPPER tri!
-        tmp_tt <- t(tmp)
-        tmp[lower.tri(tmp)] <- tmp_tt[lower.tri(tmp_tt)]
-      }
-      m_free_idx[[offset]] <- which(tmp > 0)
-      x_free_idx[[offset]] <- tmp[which(tmp > 0)]
+      free_idx <- lav_matrix_rowcol_idx(
+        row = rep_row[idx],
+        col = rep_col[idx],
+        value = partable_free[idx],
+        nrow = mm_row,
+        ncol = mm_col,
+        symmetric = mm_is_symmetric
+      )
+      m_free_idx[[offset]] <- free_idx$m.idx
+      x_free_idx[[offset]] <- free_idx$x.idx
 
       # 2. if simple equality constraints, unconstrained free parameters
       #    -> to be used in lav_model_gradient
       if (eq_simple) {
-        tmp[cbind(
-          tmp_rep$row[idx],
-          tmp_rep$col[idx]
-        )] <- lavpartable$unco[idx]
-        if (mm_symmetric[mm]) {
-          # NOTE: we assume everything is in the UPPER tri!
-          tmp_tt <- t(tmp)
-          tmp[lower.tri(tmp)] <- tmp_tt[lower.tri(tmp_tt)]
-        }
+        unco_idx <- lav_matrix_rowcol_idx(
+          row = rep_row[idx],
+          col = rep_col[idx],
+          value = lavpartable$unco[idx],
+          nrow = mm_row,
+          ncol = mm_col,
+          symmetric = mm_is_symmetric
+        )
         # m.unco.idx[[offset]] <-     which(tmp > 0)
-        x_unco_idx[[offset]] <- tmp[which(tmp > 0)]
+        x_unco_idx[[offset]] <- unco_idx$x.idx
       } else {
         # m.unco.idx[[offset]] <- m.free.idx[[offset]]
         x_unco_idx[[offset]] <- x_free_idx[[offset]]
       }
 
       # 3. general mapping between user and tmp.glist
-      tmp[cbind(tmp_rep$row[idx], tmp_rep$col[idx])] <- lavpartable$id[idx]
-      if (mm_symmetric[mm]) {
-        tmp_tt <- t(tmp)
-        tmp[lower.tri(tmp)] <- tmp_tt[lower.tri(tmp_tt)]
-      }
-      m_user_idx[[offset]] <- which(tmp > 0)
-      x_user_idx[[offset]] <- tmp[which(tmp > 0)]
+      user_idx <- lav_matrix_rowcol_idx(
+        row = rep_row[idx],
+        col = rep_col[idx],
+        value = partable_id[idx],
+        nrow = mm_row,
+        ncol = mm_col,
+        symmetric = mm_is_symmetric
+      )
+      m_user_idx[[offset]] <- user_idx$m.idx
+      x_user_idx[[offset]] <- user_idx$x.idx
 
       # 4. now assign starting/fixed values
       # create empty matrix
       # FIXME: again, we may want to use sparse matrices here...
       tmp <- matrix(0.0,
-        nrow = mm_rows[mm],
-        ncol = mm_cols[mm]
+        nrow = mm_row,
+        ncol = mm_col
       )
-      tmp[cbind(tmp_rep$row[idx], tmp_rep$col[idx])] <- lavpartable$start[idx]
-      if (mm_symmetric[mm]) {
+      tmp[cbind(rep_row[idx], rep_col[idx])] <- partable_start[idx]
+      if (mm_is_symmetric) {
         tmp_tt <- t(tmp)
         tmp[lower.tri(tmp)] <- tmp_tt[lower.tri(tmp_tt)]
       }
@@ -298,10 +334,10 @@ lav_model <- function(lavpartable = NULL,                          # nolint
       # }
 
       # representation specific stuff
-      if (lavoptions$representation == "LISREL" &&
-        mm_names[mm] == "lambda") {
-        ov_dummy_names_nox <- attr(tmp_rep, "ov.dummy.names.nox")[[g]]
-        ov_dummy_names_x <- attr(tmp_rep, "ov.dummy.names.x")[[g]]
+      if (representation == "LISREL" &&
+        mm_name == "lambda") {
+        ov_dummy_names_nox <- ov_dummy_names_nox_list[[g]]
+        ov_dummy_names_x <- ov_dummy_names_x_list[[g]]
         ov_dummy_names <- c(ov_dummy_names_nox, ov_dummy_names_x)
         # define dummy latent variables
         if (length(ov_dummy_names)) {
@@ -320,7 +356,7 @@ lav_model <- function(lavpartable = NULL,                          # nolint
       }
 
       # representation specific
-      if (lavoptions$representation == "LISREL" && mm_names[mm] == "delta") {
+      if (representation == "LISREL" && mm_name == "delta") {
         # only categorical values are listed in the lavpartable
         # but all remaining values should be 1.0
         idx <- which(tmp[, 1L] == 0.0)
@@ -328,8 +364,20 @@ lav_model <- function(lavpartable = NULL,                          # nolint
       }
 
       # representation specific
-      if (lavoptions$representation == "RAM" && mm_names[mm] == "ov.idx") {
-        tmp[1, ] <- attr(tmp_rep, "ov.idx")[[g]]
+      if (representation == "RAM" && mm_name == "ov.idx") {
+        tmp[1, ] <- ov_idx_list[[g]]
+      }
+
+      if (representation == "LISREL" && mm_name == "beta") {
+        beta_pattern <- matrix(FALSE,
+          nrow = mm_row,
+          ncol = mm_col
+        )
+        if (length(idx) > 0L) {
+          beta_pattern[cbind(rep_row[idx], rep_col[idx])] <- TRUE
+        }
+        attr(tmp, "ibinv.dag.order") <-
+          lav_lisrel_beta_dag_order(beta_pattern)
       }
 
       # assign matrix to tmp.glist
@@ -343,15 +391,15 @@ lav_model <- function(lavpartable = NULL,                          # nolint
       for (set in seq_len(nefa)) {
         # determine ov idx for this set
         ov_efa <-
-          unique(lavpartable$rhs[lavpartable$op == "=~" &
-            lavpartable$block == g &
-            lavpartable$efa == efa_values[set]])
+          unique(partable_rhs[partable_op == "=~" &
+            partable_block == g &
+            partable_efa == efa_values[set]])
         ov_efa_idx[[g]][[set]] <- match(ov_efa, ov_names)
 
         lv_efa <-
-          unique(lavpartable$lhs[lavpartable$op == "=~" &
-            lavpartable$block == g &
-            lavpartable$efa == efa_values[set]])
+          unique(partable_lhs[partable_op == "=~" &
+            partable_block == g &
+            partable_efa == efa_values[set]])
         lv_efa_idx[[g]][[set]] <- match(lv_efa, lv_names)
       }
       names(ov_efa_idx[[g]]) <- efa_values
@@ -360,7 +408,7 @@ lav_model <- function(lavpartable = NULL,                          # nolint
 
     # set variances composites (new in 0.6-20)
     if (composites) {
-      mm_in_group <- 1:nmat[g] + cumsum(c(0L, nmat))[g]
+      mm_in_group <- mm_idx[[g]]
       tmp_glist[mm_in_group] <-
         lav_lisrel_comp_set_intresvar(tmp_glist[mm_in_group])
     }
@@ -389,17 +437,17 @@ lav_model <- function(lavpartable = NULL,                          # nolint
   }
 
   # which free parameters are observed variances?
-  ov_names <- lav_partable_vnames(lavpartable, "ov")
-  x_free_var_idx <- lavpartable$free[lavpartable$free &
+  ov_names <- unique(unlist(lavpta_vnames$ov, use.names = FALSE))
+  x_free_var_idx <- partable_free[partable_free &
     # !duplicated(lavpartable$free) &
-    lavpartable$lhs %in% ov_names &
-    lavpartable$op == "~~" &
-    lavpartable$lhs == lavpartable$rhs]
+    partable_lhs %in% ov_names &
+    partable_op == "~~" &
+    partable_lhs == partable_rhs]
 
   rv_lv <- rv_ov <- list()
   if (multilevel) {
     # store information about random slopes (if any)
-    lv_names <- lav_partable_vnames(lavpartable, "lv")
+    lv_names <- unique(unlist(lavpta_vnames$lv, use.names = FALSE))
     # we should also add split-y names (x) to lv.names
     # FIXME: make this work for multiple work multilevel
     level_values <- lav_partable_level_values(lavpartable)
@@ -407,27 +455,29 @@ lav_model <- function(lavpartable = NULL,                          # nolint
     ovx2 <- lav_object_vnames(lavpartable, "ov.x", level = level_values[2])
     ovx12 <- ovx2[ovx2 %in% ovx1]
     lv_names <- c(lv_names, ovx12)
+    partable_level <- lavpartable$level
+    partable_rv <- lavpartable$rv
 
     # RV LV
-    rv_idx <- which(nchar(lavpartable$rv) > 0L &
-      lavpartable$level == level_values[1] &
-      lavpartable$rhs %in% lv_names)
+    rv_idx <- which(nchar(partable_rv) > 0L &
+      partable_level == level_values[1] &
+      partable_rhs %in% lv_names)
     if (length(rv_idx)) {
       rv_lv <- lapply(rv_idx, function(x) {
-        c(lavpartable$lhs[x], lavpartable$rhs[x])
+        c(partable_lhs[x], partable_rhs[x])
       })
-      names(rv_lv) <- lavpartable$rv[rv_idx]
+      names(rv_lv) <- partable_rv[rv_idx]
     }
 
     # RV OV
-    rv_idx <- which(nchar(lavpartable$rv) > 0L &
-      lavpartable$level == level_values[1] &
-      !lavpartable$rhs %in% lv_names)
+    rv_idx <- which(nchar(partable_rv) > 0L &
+      partable_level == level_values[1] &
+      !partable_rhs %in% lv_names)
     if (length(rv_idx)) {
       rv_ov <- lapply(rv_idx, function(x) {
-        c(lavpartable$lhs[x], lavpartable$rhs[x])
+        c(partable_lhs[x], partable_rhs[x])
       })
-      names(rv_ov) <- lavpartable$rv[rv_idx]
+      names(rv_ov) <- partable_rv[rv_idx]
     }
   } # multilevel
 
@@ -444,7 +494,7 @@ lav_model <- function(lavpartable = NULL,                          # nolint
     dimNames = dim_names,
     isSymmetric = is_symmetric,
     mmSize = mm_size,
-    representation = lavoptions$representation,
+    representation = representation,
     modprop = modprop,
     meanstructure = meanstructure,
     correlation = correlation,
@@ -457,6 +507,7 @@ lav_model <- function(lavpartable = NULL,                          # nolint
     nefa = nefa,
     group.w.free = group_w_free,
     nmat = nmat,
+    mm.idx = mm_idx,
     nvar = nvar,
     num.idx = num_idx,
     th.idx = th_idx,
@@ -500,7 +551,7 @@ lav_model <- function(lavpartable = NULL,                          # nolint
     con.lambda = con_lambda,
     nexo = nexo,
     fixed.x = lavoptions$fixed.x,
-    conditional.x = lavoptions$conditional.x,
+    conditional.x = conditional_x,
     parameterization = lavoptions$parameterization,
     ov.x.dummy.ov.idx = ov_x_dummy_ov_idx,
     ov.x.dummy.lv.idx = ov_x_dummy_lv_idx,

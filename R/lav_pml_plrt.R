@@ -64,15 +64,21 @@ lav_pml_plrt <- function(lavobject = NULL, lavmodel = NULL, lavdata = NULL,
 
   # we also need a `saturated model', but where the moments are based
   # on the model-implied sample statistics under H0
+  implied_fast <- lav_model_implied_fast(
+    lavmodel = lavmodel,
+    need_sigma = TRUE,
+    need_mu = TRUE,
+    need_th = TRUE
+  )
   model_sat2 <-
     lav_partable_unrestricted(
       lavobject = NULL,
       lavdata = lavdata,
       lavoptions = lavoptions,
       lavsamplestats = NULL,
-      sample.cov = lav_model_sigma(lavmodel),
-      sample.mean = lav_model_mu(lavmodel),
-      sample.th = lav_model_th(lavmodel),
+      sample.cov = implied_fast$sigma,
+      sample.mean = implied_fast$mu,
+      sample.th = implied_fast$th,
       sample.th.idx = lavsamplestats@th.idx
     )
 

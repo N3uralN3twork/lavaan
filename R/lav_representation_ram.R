@@ -211,12 +211,24 @@ lav_ram_sigmahat <- function(mlist = NULL, delta = NULL) {
 
   # if delta, scale
   if (!is.null(mlist$delta) && delta) {
-    nvar <- ncol(vy)
-    mm_delta <- diag(mlist$delta[, 1L], nrow = nvar, ncol = nvar)
-    vy <- mm_delta %*% vy %*% mm_delta
+    vy <- lav_matrix_diag_prepost(vy, mlist$delta[, 1L])
   }
 
   vy
+}
+
+lav_ram_sigmahat_diag <- function(mlist = NULL, delta = NULL) {
+  ov_idx <- as.integer(mlist$ov.idx[1, ])
+  ia_inv <- lav_matrix_inverse_iminus(mlist$A)
+  ia_inv_ov <- ia_inv[ov_idx, , drop = FALSE]
+
+  vy_diag <- rowSums((ia_inv_ov %*% mlist$S) * ia_inv_ov)
+  if (!is.null(mlist$delta) && delta) {
+    d <- as.vector(mlist$delta[, 1L])
+    vy_diag <- vy_diag * d * d
+  }
+
+  vy_diag
 }
 
 # VETA: the variance/covariance matrix of the latent variables only
@@ -258,6 +270,53 @@ lav_ram_muhat <- function(mlist = NULL) {
   muhat <- eyeta[ov_idx, , drop = FALSE]
 
   muhat
+}
+
+lav_ram_implied_fast <- function(mlist = NULL,
+                                 need_sigma = FALSE,
+                                 need_mu = FALSE,
+                                 delta = TRUE) {
+  ov_idx <- as.integer(mlist$ov.idx[1, ])
+  a <- mlist$A
+  s <- mlist$S
+
+  out <- list()
+
+  if (need_sigma || need_mu) {
+    ia_inv <- lav_matrix_inverse_iminus(a)
+  }
+
+  if (need_sigma) {
+    # compute Sigma for all ov and lv
+    vyeta <- tcrossprod(ia_inv %*% s, ia_inv)
+
+    # select only observed part
+    vy <- vyeta[ov_idx, ov_idx, drop = FALSE]
+
+    # if delta, scale
+    if (!is.null(mlist$delta) && delta) {
+      vy <- lav_matrix_diag_prepost(vy, mlist$delta[, 1L])
+    }
+
+    out$sigma <- vy
+  }
+
+  if (need_mu) {
+    m <- mlist$m
+
+    # shortcut
+    if (is.null(m)) {
+      out$mu <- matrix(0, nrow = length(ov_idx), 1L)
+    } else {
+      # all means/intercepts
+      eyeta <- ia_inv %*% m
+
+      # select observed only
+      out$mu <- eyeta[ov_idx, , drop = FALSE]
+    }
+  }
+
+  out
 }
 
 # derivative of 'Sigma' wrt the (freel) elements in A and/or S

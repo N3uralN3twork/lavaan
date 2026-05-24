@@ -30,6 +30,93 @@ lav_matrix_vecr <- function(A) {         # nolint
 }
 
 
+# Delta' A Delta product used by information-matrix calculations.
+lav_matrix_delta_A_delta <- function(delta, a1) {
+  crossprod(delta, a1) %*% delta
+}
+
+
+lav_matrix_diag_prepost <- function(A, d) {
+  d <- as.vector(d)
+  if (length(d) == 0L) {
+    return(A)
+  }
+  A <- A * d
+  t(t(A) * d)
+}
+
+
+lav_matrix_chol_solve <- function(chol_mat = NULL, rhs = NULL) {
+  backsolve(chol_mat, forwardsolve(t(chol_mat), rhs))
+}
+
+
+lav_matrix_vech_weights <- function(nvar = NULL) {
+  pstar <- nvar * (nvar + 1L) / 2L
+  w <- rep(1.0, pstar)
+  w[lav_matrix_diagh_idx(nvar)] <- 0.5
+  w
+}
+
+
+lav_matrix_vech_w2_times <- function(mat = NULL, nvar = NULL,
+                                     s_inv = NULL, w = NULL) {
+  if (is.null(w)) {
+    w <- lav_matrix_vech_weights(nvar)
+  }
+  if (is.null(s_inv)) {
+    return(w * mat)
+  }
+
+  out <- matrix(0.0, nrow = nrow(mat), ncol = ncol(mat))
+  for (j in seq_len(ncol(mat))) {
+    v_j <- lav_matrix_vech_reverse(mat[, j])
+    out[, j] <- w * lav_matrix_vech(s_inv %*% v_j %*% s_inv)
+  }
+  out
+}
+
+
+# Return matrix vector indices and values from row/column/value triples.
+lav_matrix_rowcol_idx <- function(row, col, value, nrow, ncol, symmetric = FALSE) {
+  if (length(row) == 0L) {
+    return(list(m.idx = integer(0L), x.idx = value[integer(0L)]))
+  }
+
+  row <- as.integer(row)
+  col <- as.integer(col)
+  nrow <- as.integer(nrow)
+  ncol <- as.integer(ncol)
+
+  if (symmetric) {
+    upper_idx <- row <= col
+    row <- row[upper_idx]
+    col <- col[upper_idx]
+    value <- value[upper_idx]
+  }
+
+  m_idx <- row + (col - 1L) * nrow
+  keep_idx <- !duplicated(m_idx, fromLast = TRUE)
+  m_idx <- m_idx[keep_idx]
+  row <- row[keep_idx]
+  col <- col[keep_idx]
+  value <- value[keep_idx]
+
+  if (symmetric) {
+    offdiag_idx <- row != col
+    m_idx <- c(m_idx, col[offdiag_idx] + (row[offdiag_idx] - 1L) * nrow)
+    value <- c(value, value[offdiag_idx])
+  }
+
+  keep_idx <- value > 0
+  m_idx <- m_idx[keep_idx]
+  value <- value[keep_idx]
+
+  order_idx <- order(m_idx)
+  list(m.idx = m_idx[order_idx], x.idx = value[order_idx])
+}
+
+
 # vech
 #
 # the vech operator (for 'half vectorization') transforms a *symmetric* matrix
@@ -1139,6 +1226,25 @@ lav_matrix_symmetric_inverse <- function(s, logdet = FALSE,
     s_inv <- tmp
     attr(s_inv, "logdet") <- logdet
     attr(s_inv, "zero.idx") <- zero_idx
+  }
+
+  s_inv
+}
+
+lav_matrix_symmetric_inverse_chol_first <- function(s, logdet = FALSE,
+                                                    sinv_method = "eigen") {
+  c_s <- try(chol.default(s), silent = TRUE)
+  if (inherits(c_s, "try-error")) {
+    return(lav_matrix_symmetric_inverse(
+      s = s, logdet = logdet,
+      sinv_method = sinv_method
+    ))
+  }
+
+  s_inv <- chol2inv(c_s)
+  if (logdet) {
+    diag_c_s <- diag(c_s)
+    attr(s_inv, "logdet") <- 2 * sum(log(diag_c_s))
   }
 
   s_inv
