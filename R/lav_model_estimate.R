@@ -162,8 +162,9 @@ lav_model_estimate <- function(lavmodel = NULL,
       # VETA; use those diagonal elements...
       # but only if we have 'marker' indicators for each LV
       lv_var <- vector("list", lavmodel@ngroups)
+      mm_idx <- lav_model_get_mm_idx(lavmodel)
       for (g in seq_len(lavmodel@ngroups)) {
-        mm_in_group <- 1:lavmodel@nmat[g] + cumsum(c(0, lavmodel@nmat))[g]
+        mm_in_group <- mm_idx[[g]]
         mlist <- lavmodel@GLIST[mm_in_group]
         mm_lambda <- mlist$lambda
         n_lv <- ncol(mm_lambda)

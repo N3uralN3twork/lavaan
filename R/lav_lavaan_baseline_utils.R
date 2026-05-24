@@ -1,32 +1,84 @@
-lav_lavaan_baseline_supports_standard_ml <- function(lavoptions = NULL,
-                                                      lavsamplestats = NULL,
-                                                      lavdata = NULL,
-                                                      conditional_x = FALSE) {
+lav_lavaan_baseline_supports_ml <- function(lavoptions = NULL,
+                                            lavsamplestats = NULL,
+                                            lavdata = NULL,
+                                            likelihood = c("normal", "wishart"),
+                                            conditional_x = FALSE,
+                                            missing = "listwise",
+                                            missing_flag = FALSE,
+                                            meanstructure = NULL,
+                                            no_observed_x = FALSE,
+                                            no_weights = FALSE) {
+  if (!is.null(meanstructure) &&
+      !identical(isTRUE(lavoptions$meanstructure), meanstructure)) {
+    return(FALSE)
+  }
+  if (no_observed_x && !all(lengths(lavdata@ov.names.x) == 0L)) {
+    return(FALSE)
+  }
+  if (no_weights && !all(vapply(lavdata@weights, is.null, logical(1L)))) {
+    return(FALSE)
+  }
+
   identical(lavoptions$test, "standard") &&
     identical(lavoptions$estimator, "ML") &&
-    (lavoptions$likelihood %in% c("normal", "wishart")) &&
+    (lavoptions$likelihood %in% likelihood) &&
     (is.null(lavoptions$baseline.type) ||
       identical(lavoptions$baseline.type, "independence")) &&
     identical(isTRUE(lavoptions$conditional.x), conditional_x) &&
     !isTRUE(lavoptions$correlation) &&
     !isTRUE(lavoptions$group.w.free) &&
     lavdata@nlevels == 1L &&
-    identical(lavdata@missing, "listwise") &&
-    !isTRUE(lavsamplestats@missing.flag) &&
+    identical(lavdata@missing, missing) &&
+    identical(isTRUE(lavsamplestats@missing.flag), missing_flag) &&
     length(lavdata@ordered) == 0L &&
     all(lavdata@ov$type == "numeric")
 }
 
+lav_lavaan_baseline_supports_standard_ml <- function(lavoptions = NULL,
+                                                      lavsamplestats = NULL,
+                                                      lavdata = NULL,
+                                                      conditional_x = FALSE) {
+  lav_lavaan_baseline_supports_ml(
+    lavoptions = lavoptions,
+    lavsamplestats = lavsamplestats,
+    lavdata = lavdata,
+    likelihood = c("normal", "wishart"),
+    conditional_x = conditional_x,
+    missing = "listwise",
+    missing_flag = FALSE
+  )
+}
+
+lav_lavaan_baseline_supports_fiml_ml <- function(lavoptions = NULL,
+                                                 lavsamplestats = NULL,
+                                                 lavdata = NULL) {
+  lav_lavaan_baseline_supports_ml(
+    lavoptions = lavoptions,
+    lavsamplestats = lavsamplestats,
+    lavdata = lavdata,
+    likelihood = "normal",
+    conditional_x = FALSE,
+    missing = "ml",
+    missing_flag = TRUE,
+    meanstructure = TRUE,
+    no_observed_x = TRUE,
+    no_weights = TRUE
+  )
+}
+
 lav_lavaan_baseline_standard_test <- function(fx_group = NULL,
+                                              stat_group = NULL,
                                               df_group = NULL,
                                               lavoptions = NULL,
                                               lavsamplestats = NULL,
                                               lavdata = NULL) {
-  nfac <- 2 * unlist(lavsamplestats@nobs)
-  if (identical(lavoptions$likelihood, "wishart")) {
-    nfac <- 2 * (nfac / 2 - 1)
+  if (is.null(stat_group)) {
+    nfac <- 2 * unlist(lavsamplestats@nobs)
+    if (identical(lavoptions$likelihood, "wishart")) {
+      nfac <- 2 * (nfac / 2 - 1)
+    }
+    stat_group <- fx_group * nfac
   }
-  stat_group <- fx_group * nfac
   stat <- sum(stat_group)
   df <- sum(df_group)
   pvalue <- if (df == 0L) {
@@ -62,6 +114,95 @@ lav_lavaan_baseline_has_optim_bounds <- function(bounds = NULL) {
     return(length(bounds) > 0L)
   }
   any(lengths(bounds) > 0L)
+}
+
+lav_lavaan_baseline_context <- function(lavoptions = NULL,
+                                        lavsamplestats = NULL,
+                                        lavdata = NULL,
+                                        lavpartable = NULL,
+                                        lavh1 = NULL) {
+  list(
+    lavoptions = lavoptions,
+    lavsamplestats = lavsamplestats,
+    lavdata = lavdata,
+    lavpartable = lavpartable,
+    lavh1 = lavh1
+  )
+}
+
+lav_lavaan_baseline_payload_order <- function() {
+  c("conditional_x", "simple", "fiml", "generated_independence")
+}
+
+lav_lavaan_baseline_payloads <- function() {
+  payloads <- list(
+    conditional_x = function(context) {
+      lav_lavaan_baseline_conditional_x_payload(
+        lavoptions = context$lavoptions,
+        lavsamplestats = context$lavsamplestats,
+        lavdata = context$lavdata
+      )
+    },
+    simple = function(context) {
+      lav_lavaan_baseline_simple_payload(
+        lavoptions = context$lavoptions,
+        lavsamplestats = context$lavsamplestats,
+        lavdata = context$lavdata,
+        lavpartable = context$lavpartable
+      )
+    },
+    fiml = function(context) {
+      lav_lavaan_baseline_fiml_payload(
+        lavoptions = context$lavoptions,
+        lavsamplestats = context$lavsamplestats,
+        lavdata = context$lavdata,
+        lavpartable = context$lavpartable,
+        lavh1 = context$lavh1
+      )
+    },
+    generated_independence = function(context) {
+      lav_lavaan_baseline_generated_independence_payload(
+        lavoptions = context$lavoptions,
+        lavsamplestats = context$lavsamplestats,
+        lavdata = context$lavdata,
+        lavpartable = context$lavpartable,
+        lavh1 = context$lavh1
+      )
+    }
+  )
+  payloads[lav_lavaan_baseline_payload_order()]
+}
+
+lav_lavaan_baseline_payload_is_valid <- function(payload = NULL) {
+  is.list(payload) &&
+    !is.null(payload$partable) &&
+    !is.null(payload$test)
+}
+
+lav_lavaan_baseline_try_payloads <- function(context = NULL,
+                                             payloads = NULL) {
+  if (is.null(payloads)) {
+    payloads <- lav_lavaan_baseline_payloads()
+  }
+  payload_names <- names(payloads)
+  for (i in seq_along(payloads)) {
+    payload <- payloads[[i]]
+    payload_name <- payload_names[[i]]
+    if (is.null(payload_name) || !nzchar(payload_name)) {
+      payload_name <- paste0("payload_", i)
+    }
+    out <- payload(context)
+    if (!is.null(out)) {
+      if (!lav_lavaan_baseline_payload_is_valid(out)) {
+        lav_msg_stop(gettextf(
+          "baseline fast payload '%s' returned a malformed payload.",
+          payload_name
+        ))
+      }
+      return(out)
+    }
+  }
+  NULL
 }
 
 lav_lavaan_baseline_finite_vector <- function(x = NULL,
@@ -472,9 +613,95 @@ lav_lavaan_baseline_fx_group <- function(model_log_det = NULL,
   fx_group
 }
 
+lav_lavaan_baseline_sy_diag <- function(sy = NULL,
+                                        n = NULL) {
+  sy_diag <- if (is.matrix(sy)) {
+    diag(sy)
+  } else {
+    as.numeric(sy)
+  }
+  if (!is.null(n) && length(sy_diag) == 1L && n > 1L &&
+      isTRUE(all.equal(sy_diag, 0.0))) {
+    sy_diag <- numeric(n)
+  }
+  sy_diag
+}
+
+lav_lavaan_baseline_fiml_moments <- function(missing = NULL,
+                                             nvar = NULL) {
+  if (is.null(missing) || length(missing) == 0L || is.null(nvar)) {
+    return(NULL)
+  }
+
+  count <- sum_y <- numeric(nvar)
+  for (p in seq_along(missing)) {
+    pat <- missing[[p]]
+    var_idx <- pat$var.idx
+    freq <- pat$freq
+    my <- pat$MY
+    if (!is.logical(var_idx) || length(var_idx) != nvar ||
+        !is.finite(freq) || freq <= 0L) {
+      return(NULL)
+    }
+    obs_idx <- which(var_idx)
+    if (length(obs_idx) != length(my) || anyNA(my) || any(!is.finite(my))) {
+      return(NULL)
+    }
+    count[obs_idx] <- count[obs_idx] + freq
+    sum_y[obs_idx] <- sum_y[obs_idx] + freq * my
+  }
+  if (any(count <= 0.0)) {
+    return(NULL)
+  }
+
+  mean <- sum_y / count
+  ss <- numeric(nvar)
+  for (p in seq_along(missing)) {
+    pat <- missing[[p]]
+    obs_idx <- which(pat$var.idx)
+    sy_diag <- lav_lavaan_baseline_sy_diag(pat$SY, n = length(obs_idx))
+    if (length(sy_diag) != length(obs_idx) ||
+        anyNA(sy_diag) || any(!is.finite(sy_diag))) {
+      return(NULL)
+    }
+    diff <- pat$MY - mean[obs_idx]
+    ss[obs_idx] <- ss[obs_idx] + pat$freq * (sy_diag + diff * diff)
+  }
+
+  var <- ss / count
+  if (!lav_lavaan_baseline_finite_vector(mean, n = nvar) ||
+      !lav_lavaan_baseline_finite_vector(var, n = nvar, positive = TRUE)) {
+    return(NULL)
+  }
+
+  list(mean = mean, var = var)
+}
+
+lav_lavaan_baseline_fiml_loglik <- function(missing = NULL,
+                                            mean = NULL,
+                                            var = NULL) {
+  log_2pi <- log(2 * pi)
+  log_var <- log(var)
+  loglik <- 0.0
+
+  for (p in seq_along(missing)) {
+    pat <- missing[[p]]
+    obs_idx <- which(pat$var.idx)
+    sy_diag <- lav_lavaan_baseline_sy_diag(pat$SY, n = length(obs_idx))
+    diff <- pat$MY - mean[obs_idx]
+    loglik <- loglik - 0.5 * pat$freq * (
+      length(obs_idx) * log_2pi +
+        sum(log_var[obs_idx]) +
+        sum((sy_diag + diff * diff) / var[obs_idx])
+    )
+  }
+
+  loglik
+}
+
 lav_lavaan_baseline_simple_payload <- function(lavoptions = NULL,
-                                               lavsamplestats = NULL,
-                                               lavdata = NULL,
+                                                lavsamplestats = NULL,
+                                                lavdata = NULL,
                                                lavpartable = NULL) {
   if (!lav_lavaan_baseline_supports_standard_ml(
     lavoptions = lavoptions,
@@ -598,6 +825,137 @@ lav_lavaan_baseline_simple_payload <- function(lavoptions = NULL,
     partable = partable,
     test = lav_lavaan_baseline_standard_test(
       fx_group = lav_lavaan_baseline_fx_group(model_log_det, sample_log_det),
+      df_group = df_group,
+      lavoptions = lavoptions,
+      lavsamplestats = lavsamplestats,
+      lavdata = lavdata
+    )
+  )
+}
+
+lav_lavaan_baseline_fiml_payload <- function(lavoptions = NULL,
+                                             lavsamplestats = NULL,
+                                             lavdata = NULL,
+                                             lavpartable = NULL,
+                                             lavh1 = NULL) {
+  if (!lav_lavaan_baseline_supports_fiml_ml(
+    lavoptions = lavoptions,
+    lavsamplestats = lavsamplestats,
+    lavdata = lavdata
+  )) {
+    return(NULL)
+  }
+
+  ngroups <- lavdata@ngroups
+  if (length(lavsamplestats@missing) != ngroups ||
+      length(lavsamplestats@cov) != ngroups ||
+      is.null(lavh1$logl$loglik.group) ||
+      length(lavh1$logl$loglik.group) != ngroups) {
+    return(NULL)
+  }
+
+  moments <- vector("list", ngroups)
+  ov_names <- vector("list", ngroups)
+  start_var <- vector("list", ngroups)
+  start_mean <- vector("list", ngroups)
+  h0_loglik <- numeric(ngroups)
+  df_group <- integer(ngroups)
+  for (g in seq_len(ngroups)) {
+    nvar <- ncol(lavsamplestats@cov[[g]])
+    ov_names[[g]] <- lav_lavaan_baseline_ov_names(
+      lavdata = lavdata,
+      sample_cov = lavsamplestats@cov[[g]],
+      group = g
+    )
+    if (is.null(ov_names[[g]])) {
+      return(NULL)
+    }
+    start_var[[g]] <- diag(lavsamplestats@cov[[g]])
+    if (!lav_lavaan_baseline_finite_vector(start_var[[g]], n = nvar,
+                                           positive = TRUE)) {
+      return(NULL)
+    }
+    start_mean[[g]] <- lav_lavaan_baseline_mean_moment(
+      lavsamplestats = lavsamplestats,
+      group = g,
+      nvar = nvar
+    )
+    if (is.null(start_mean[[g]])) {
+      return(NULL)
+    }
+    moments[[g]] <- lav_lavaan_baseline_fiml_moments(
+      missing = lavsamplestats@missing[[g]],
+      nvar = nvar
+    )
+    if (is.null(moments[[g]])) {
+      return(NULL)
+    }
+    h0_loglik[[g]] <- lav_lavaan_baseline_fiml_loglik(
+      missing = lavsamplestats@missing[[g]],
+      mean = moments[[g]]$mean,
+      var = moments[[g]]$var
+    )
+    if (!is.finite(h0_loglik[[g]])) {
+      return(NULL)
+    }
+    df_group[[g]] <- as.integer(nvar * (nvar - 1L) / 2L)
+  }
+
+  rows <- list()
+  for (g in seq_len(ngroups)) {
+    rows <- c(rows, lav_lavaan_baseline_variance_rows(
+      names = ov_names[[g]],
+      values = start_var[[g]],
+      group = g
+    ))
+    rows <- c(rows, lav_lavaan_baseline_mean_rows(
+      names = ov_names[[g]],
+      values = start_mean[[g]],
+      group = g
+    ))
+  }
+  partable_out <- lav_lavaan_baseline_append_partable_rows(
+    partable = lav_lavaan_baseline_new_partable(),
+    rows = rows,
+    free_idx = 0L
+  )
+  partable <- partable_out$partable
+
+  if (!is.null(lavoptions$optim.bounds)) {
+    partable$lower <- rep(-Inf, length(partable$lhs))
+    partable$upper <- rep(Inf, length(partable$lhs))
+    var_rows <- which(partable$op == "~~" & partable$lhs == partable$rhs)
+    partable$lower[var_rows] <- 0.0
+  }
+
+  for (g in seq_len(ngroups)) {
+    group_rows <- which(partable$group == g)
+    for (i in group_rows) {
+      lhs_idx <- match(partable$lhs[[i]], ov_names[[g]])
+      if (is.na(lhs_idx)) {
+        return(NULL)
+      }
+      if (partable$op[[i]] == "~~" && partable$lhs[[i]] == partable$rhs[[i]]) {
+        value <- moments[[g]]$var[[lhs_idx]]
+      } else if (partable$op[[i]] == "~1") {
+        value <- moments[[g]]$mean[[lhs_idx]]
+      } else {
+        return(NULL)
+      }
+      partable$est[[i]] <- value
+    }
+  }
+
+  stat_group <- 2 * (lavh1$logl$loglik.group - h0_loglik)
+  stat_group[abs(stat_group) < .Machine$double.eps^(1 / 2)] <- 0.0
+  if (any(!is.finite(stat_group)) || any(stat_group < 0.0)) {
+    return(NULL)
+  }
+
+  list(
+    partable = partable,
+    test = lav_lavaan_baseline_standard_test(
+      stat_group = stat_group,
       df_group = df_group,
       lavoptions = lavoptions,
       lavsamplestats = lavsamplestats,

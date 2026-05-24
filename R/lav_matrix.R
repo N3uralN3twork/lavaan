@@ -46,6 +46,37 @@ lav_matrix_diag_prepost <- function(A, d) {
 }
 
 
+lav_matrix_chol_solve <- function(chol_mat = NULL, rhs = NULL) {
+  backsolve(chol_mat, forwardsolve(t(chol_mat), rhs))
+}
+
+
+lav_matrix_vech_weights <- function(nvar = NULL) {
+  pstar <- nvar * (nvar + 1L) / 2L
+  w <- rep(1.0, pstar)
+  w[lav_matrix_diagh_idx(nvar)] <- 0.5
+  w
+}
+
+
+lav_matrix_vech_w2_times <- function(mat = NULL, nvar = NULL,
+                                     s_inv = NULL, w = NULL) {
+  if (is.null(w)) {
+    w <- lav_matrix_vech_weights(nvar)
+  }
+  if (is.null(s_inv)) {
+    return(w * mat)
+  }
+
+  out <- matrix(0.0, nrow = nrow(mat), ncol = ncol(mat))
+  for (j in seq_len(ncol(mat))) {
+    v_j <- lav_matrix_vech_reverse(mat[, j])
+    out[, j] <- w * lav_matrix_vech(s_inv %*% v_j %*% s_inv)
+  }
+  out
+}
+
+
 # Return matrix vector indices and values from row/column/value triples.
 lav_matrix_rowcol_idx <- function(row, col, value, nrow, ncol, symmetric = FALSE) {
   if (length(row) == 0L) {

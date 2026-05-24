@@ -1104,30 +1104,40 @@ lav_model_omega <- function(sigma_hat = NULL, mu_hat = NULL,
         nvar <- ncol(lavsamplestats@cov[[g]])
         omega_1 <- matrix(0, nvar, nvar)
         omega_mu_1 <- matrix(0, nvar, 1)
+        sigma_g <- sigma_hat[[g]]
+        mu_g <- mu_hat[[g]]
+        ntotal_inv <- 1 / lavsamplestats@ntotal
+        sigma_po <- isTRUE(attr(sigma_g, "po"))
 
         for (p in seq_along(m)) {
           sx <- m[[p]][["SY"]]
           mx <- m[[p]][["MY"]]
           nobs <- m[[p]][["freq"]]
           var_idx <- m[[p]][["var.idx"]]
+          sigma_p <- sigma_g[var_idx, var_idx]
 
-          sigma_inv <- try(chol2inv(chol(sigma_hat[[g]][var_idx, var_idx])),
-                          silent = TRUE)
-          if (inherits(sigma_inv, "try-error")) {
-            sigma_inv <- MASS::ginv(sigma_hat[[g]][var_idx, var_idx])
+          if (sigma_po) {
+            sigma_inv <- chol2inv(chol.default(sigma_p))
+          } else {
+            sigma_inv <- try(chol2inv(chol.default(sigma_p)), silent = TRUE)
+            if (inherits(sigma_inv, "try-error")) {
+              sigma_inv <- MASS::ginv(sigma_p)
+            }
           }
-          mu <- mu_hat[[g]][var_idx]
-          w_tilde <- sx + tcrossprod(mx - mu)
+          diff <- mx - mu_g[var_idx]
+          score_mu <- drop(sigma_inv %*% diff)
+          weight <- nobs * ntotal_inv
+          if (!is.matrix(sx)) {
+            sx <- matrix(as.numeric(sx), length(diff), length(diff))
+          }
 
           omega_mu_1[var_idx, 1] <-
-            (omega_mu_1[var_idx, 1] + nobs / lavsamplestats@ntotal *
-              crossprod(sigma_inv, mx - mu))
+            (omega_mu_1[var_idx, 1] + weight * score_mu)
 
           omega_1[var_idx, var_idx] <-
-            (omega_1[var_idx, var_idx] + nobs / lavsamplestats@ntotal *
-              (sigma_inv %*%
-                (w_tilde - sigma_hat[[g]][var_idx, var_idx]) %*%
-                sigma_inv))
+            (omega_1[var_idx, var_idx] + weight *
+              (sigma_inv %*% sx %*% sigma_inv +
+                tcrossprod(score_mu) - sigma_inv))
         }
         omega_mu[[g]] <- omega_mu_1
         omega[[g]] <- omega_1

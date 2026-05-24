@@ -3,32 +3,15 @@ lav_lavaan_step15_baseline_fast <- function(lavoptions = NULL,
                                             lavdata = NULL,
                                             lavpartable = NULL,
                                             lavh1 = NULL) {
-  conditional_x_payload <- lav_lavaan_baseline_conditional_x_payload(
-    lavoptions = lavoptions,
-    lavsamplestats = lavsamplestats,
-    lavdata = lavdata
-  )
-  if (!is.null(conditional_x_payload)) {
-    return(conditional_x_payload)
-  }
-
-  simple_payload <- lav_lavaan_baseline_simple_payload(
-    lavoptions = lavoptions,
-    lavsamplestats = lavsamplestats,
-    lavdata = lavdata,
-    lavpartable = lavpartable
-  )
-  if (!is.null(simple_payload)) {
-    return(simple_payload)
-  }
-
-  lav_lavaan_baseline_generated_independence_payload(
+  context <- lav_lavaan_baseline_context(
     lavoptions = lavoptions,
     lavsamplestats = lavsamplestats,
     lavdata = lavdata,
     lavpartable = lavpartable,
     lavh1 = lavh1
   )
+
+  lav_lavaan_baseline_try_payloads(context)
 }
 
 lav_lavaan_step15_baseline <- function(lavoptions = NULL,
