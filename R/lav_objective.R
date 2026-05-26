@@ -56,7 +56,8 @@ lav_model_objective_ml_res <- function(sigma_hat = NULL, mu_hat = NULL,
   obs <- t(cbind(res_int, res_slopes))
   est <- t(cbind(mu_hat, pi0))
   diff_1 <- obs - est
-  objective_beta <- sum(sigma_hat_inv * crossprod(diff_1, c3) %*% diff_1)
+  c3_diff <- c3 %*% diff_1
+  objective_beta <- sum(c3_diff * (diff_1 %*% sigma_hat_inv))
 
   fx <- objective_sigma + objective_beta
 
@@ -126,7 +127,7 @@ lav_model_objective_gls <- function(sigma_hat = NULL,
     # Bentler & Savalei (2010) eq 1.31
     dd <- as.matrix(diag(tmp))
     tt <- diag(nrow(data_cov)) + data_cov * data_cov_inv
-    fx <- fx - drop(t(dd) %*% solve(tt) %*% dd)
+    fx <- fx - drop(crossprod(dd, solve(tt, dd)))
   }
 
   if (meanstructure) {
@@ -182,7 +183,9 @@ lav_model_objective_fiml <- function(sigma_hat = NULL, mu_hat = NULL, yp = NULL,
     yp = yp,
     mu = mu_hat, sigma_1 = sigma_hat,
     log2pi = FALSE,
-    minus_two = TRUE
+    minus_two = TRUE,
+    sigma_inv = attr(sigma_hat, "inv", exact = TRUE),
+    sigma_logdet = attr(sigma_hat, "log.det", exact = TRUE)
   ) / n
 
   # ajust for h1

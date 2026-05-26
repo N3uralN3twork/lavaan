@@ -114,17 +114,29 @@ lav_mvnorm_missing_loglik_samplestats <- function(yp = NULL, # nolint
                                                   x_cov = NULL,
                                                   sinv_method = "eigen",
                                                   log2pi = TRUE,
-                                                  minus_two = FALSE) {
+                                                  minus_two = FALSE,
+                                                  sigma_inv = NULL,
+                                                  sigma_logdet = NULL) {
   log_2pi <- log(2 * pi)
   yp_prepared <- lav_mvnorm_missing_prepare_samplestats(yp)
   pat_n <- yp_prepared$pat_n
 
   # global inverse + logdet
-  sigma_inv_1 <- lav_matrix_symmetric_inverse_chol_first(
-    s = sigma_1, logdet = TRUE,
-    sinv_method = sinv_method
-  )
-  sigma_logdet <- attr(sigma_inv_1, "logdet")
+  if (is.null(sigma_inv) || is.null(sigma_logdet)) {
+    sigma_inv_computed <- lav_matrix_symmetric_inverse_chol_first(
+      s = sigma_1, logdet = TRUE,
+      sinv_method = sinv_method
+    )
+    sigma_inv_1 <- sigma_inv_computed
+    if (is.null(sigma_logdet)) {
+      sigma_logdet <- attr(sigma_inv_computed, "logdet", exact = TRUE)
+    }
+    if (!is.null(sigma_inv)) {
+      sigma_inv_1 <- sigma_inv
+    }
+  } else {
+    sigma_inv_1 <- sigma_inv
+  }
 
   # DIST/logdet per pattern
   dist_1 <- logdet <- p_log_2pi <- numeric(pat_n)

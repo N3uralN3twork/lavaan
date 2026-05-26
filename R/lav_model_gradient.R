@@ -491,7 +491,9 @@ lav_model_gradient <- function(lavmodel = NULL,
       #        (lav_matrix_vec(C3) %x% diag( nvar * nvar) )
 
       # POST.beta <- 2 *  beta.COV %*% (obs.beta - est.beta)
-      d_beta <- c3 %*% (obs - est) %*% sigma_inv
+      diff <- obs - est
+      c3_diff <- c3 %*% diff
+      d_beta <- c3_diff %*% sigma_inv
       # NOTE: the vecr here, unlike lav_mvreg_dlogl_beta
       #       this is because DELTA has used vec(t(BETA)),
       #       instead of vec(BETA)
@@ -506,7 +508,7 @@ lav_model_gradient <- function(lavmodel = NULL,
       # POST.sigma2 <- lav_matrix_duplication_pre(
       #                 matrix( lav_matrix_vec(
       #          Sigma.inv %*% (S - Sigma) %*% t(Sigma.inv)), ncol = 1L))
-      w_tilde <- s + t(obs - est) %*% c3 %*% (obs - est)
+      w_tilde <- s + crossprod(diff, c3_diff)
       d_sigma <- (sigma_inv - sigma_inv %*% w_tilde %*% sigma_inv)
       d_vech_sigma <- as.numeric(lav_matrix_duplication_pre(
         as.matrix(lav_matrix_vec(d_sigma))
@@ -1108,17 +1110,29 @@ lav_model_omega <- function(sigma_hat = NULL, mu_hat = NULL,
         mu_g <- mu_hat[[g]]
         ntotal_inv <- 1 / lavsamplestats@ntotal
         sigma_po <- isTRUE(attr(sigma_g, "po"))
+        sigma_inv_g <- attr(sigma_g, "inv", exact = TRUE)
 
         for (p in seq_along(m)) {
           sx <- m[[p]][["SY"]]
           mx <- m[[p]][["MY"]]
           nobs <- m[[p]][["freq"]]
           var_idx <- m[[p]][["var.idx"]]
-          sigma_p <- sigma_g[var_idx, var_idx]
 
-          if (sigma_po) {
-            sigma_inv <- chol2inv(chol.default(sigma_p))
+          if (sigma_po && !is.null(sigma_inv_g)) {
+            if (is.logical(var_idx)) {
+              na_idx <- which(!var_idx)
+            } else {
+              na_idx <- setdiff(seq_len(nvar), var_idx)
+            }
+            if (length(na_idx) > 0L) {
+              sigma_inv <- lav_matrix_symmetric_inverse_update(
+                s_inv = sigma_inv_g, rm_idx = na_idx, logdet = FALSE
+              )
+            } else {
+              sigma_inv <- sigma_inv_g
+            }
           } else {
+            sigma_p <- sigma_g[var_idx, var_idx]
             sigma_inv <- try(chol2inv(chol.default(sigma_p)), silent = TRUE)
             if (inherits(sigma_inv, "try-error")) {
               sigma_inv <- MASS::ginv(sigma_p)

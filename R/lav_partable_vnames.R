@@ -108,6 +108,42 @@ lav_partable_vnames_cached_block_subset <- function(cached_values,
   out
 }
 
+lav_partable_vnames_type_list <- c(
+  "ov", # observed variables (ov)
+  "ov.x", # (pure) exogenous observed variables
+  "ov.nox", # non-exogenous observed variables
+  "ov.model", # modeled observed variables (joint vs cond)
+  "ov.y", # (pure) endogenous variables (dependent only)
+  "ov.num", # numeric observed variables
+  "ov.ord", # ordinal observed variables
+  "ov.ind",  # observed indicators of latent variables
+  "ov.cind", # observed indicators of composites (new in 0.6-20)
+  "ov.orphan", # lonely observed intercepts/variances
+  "ov.interaction", # interaction terms (with colon)
+  "ov.efa", # indicators involved in efa
+
+  "th", # thresholds ordinal only
+  "th.mean", # thresholds ordinal + numeric variables
+
+  "lv", # latent variables
+  "lv.regular", # latent variables (defined by =~ only)
+  "lv.formative", # latent variables (defined by <~ only) (old style)
+  "lv.composite", # latent variables (defined by <~ only) (new style)
+  "lv.x", # (pure) exogenous variables
+  "lv.y", # (pure) endogenous variables
+  "lv.nox", # non-exogenous latent variables
+  "lv.nonnormal", # latent variables with non-normal indicators
+  "lv.interaction", # interaction terms
+  "lv.efa", # latent variables involved in efa
+  "lv.rv", # random slopes, random variables
+  "lv.ind", # latent indicators (higher-order cfa)
+  "lv.ho",  # higher-order latent variables
+  "lv.marker", # marker indicator per lv
+
+  "eqs.y", # y's in regression
+  "eqs.x" # x's in regression
+)
+
 # return variable names in a partable
 # - the 'type' argument determines the status of the variable: observed,
 #   latent, endo/exo/...; default = "ov", but most used is type = "all"
@@ -157,41 +193,69 @@ lav_partable_vnames <- function(partable, type = NULL, ..., # nolint
   # dotdotdot
   dotdotdot <- list(...)
   ndotdotdot <- length(dotdotdot)
-  type_list <- c(
-    "ov", # observed variables (ov)
-    "ov.x", # (pure) exogenous observed variables
-    "ov.nox", # non-exogenous observed variables
-    "ov.model", # modeled observed variables (joint vs cond)
-    "ov.y", # (pure) endogenous variables (dependent only)
-    "ov.num", # numeric observed variables
-    "ov.ord", # ordinal observed variables
-    "ov.ind",  # observed indicators of latent variables
-    "ov.cind", # observed indicators of composites (new in 0.6-20)
-    "ov.orphan", # lonely observed intercepts/variances
-    "ov.interaction", # interaction terms (with colon)
-    "ov.efa", # indicators involved in efa
 
-    "th", # thresholds ordinal only
-    "th.mean", # thresholds ordinal + numeric variables
+  cached_vnames <- attr(partable, "vnames", exact = TRUE)
+  if (type[1L] != "*" &&
+      !is.null(cached_vnames) &&
+      (type[1L] == "all" || all(type %in% names(cached_vnames)))) {
+    if (type[1L] == "all") {
+      return_value <- cached_vnames
+    } else {
+      return_value <- cached_vnames[type]
+    }
 
-    "lv", # latent variables
-    "lv.regular", # latent variables (defined by =~ only)
-    "lv.formative", # latent variables (defined by <~ only) (old style)
-    "lv.composite", # latent variables (defined by <~ only) (new style)
-    "lv.x", # (pure) exogenous variables
-    "lv.y", # (pure) endogenous variables
-    "lv.nox", # non-exogenous latent variables
-    "lv.nonnormal", # latent variables with non-normal indicators
-    "lv.interaction", # interaction terms
-    "lv.efa", # latent variables involved in efa
-    "lv.rv", # random slopes, random variables
-    "lv.ind", # latent indicators (higher-order cfa)
-    "lv.ho",  # higher-order latent variables
-    "lv.marker", # marker indicator per lv
+    if (ndotdotdot == 0L) {
+      if (type[1L] == "all") {
+        return(return_value)
+      }
+      if (length(type) == 1L) {
+        if (type == "lv.marker") {
+          return(unlist(return_value[[type]]))
+        } else {
+          return(unique(unlist(return_value[[type]])))
+        }
+      } else {
+        return(return_value)
+      }
+    }
 
-    "eqs.y", # y's in regression
-    "eqs.x" # x's in regression
-  )
+    current_warn <- lav_warn()
+    if (force_warn) {
+      if (lav_warn(TRUE)) on.exit(lav_warn(current_warn))
+    } else {
+      if (lav_warn(FALSE)) on.exit(lav_warn(current_warn))
+    }
+
+    block_select <- lav_partable_vnames_cached_block_select(
+      partable,
+      dotdotdot
+    )
+    if (!is.null(block_select)) {
+      if (type[1L] == "all") {
+        return(lapply(return_value,
+          lav_partable_vnames_cached_block_subset,
+          block_select = block_select
+        ))
+      } else if (length(type) == 1L) {
+        return_value <- return_value[[type]]
+        if (length(block_select) == 1L) {
+          return(return_value[[block_select]])
+        } else {
+          return(lav_partable_vnames_cached_block_subset(
+            return_value,
+            block_select
+          ))
+        }
+      } else {
+        return(lapply(return_value,
+          lav_partable_vnames_cached_block_subset,
+          block_select = block_select
+        ))
+      }
+    }
+  }
+
+  type_list <- lav_partable_vnames_type_list
   if (type[1L] != "all" && type[1L] != "*" && !all(type %in% type_list)) {
     wrongtypes <- type[!(type %in% type_list)]
     lav_msg_stop(sprintf(
