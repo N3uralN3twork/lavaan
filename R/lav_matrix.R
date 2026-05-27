@@ -20,18 +20,21 @@ lav_matrix_vec <- function(A) {          # nolint
 # the vecr operator transforms a matrix into
 # a vector by stacking the *rows* of the matrix one underneath the other
 lav_matrix_vecr <- function(A) {         # nolint
-  # faster way??
-  # nRow <- NROW(A); nCol <- NCOL(A)
-  # idx <- (seq_len(nCol) - 1L) * nRow + rep(seq_len(nRow), each = nCol)
-  # if (lav_use_lavaanC() && is.numeric(A)) {
-  #   return(lavaanC::m_vecr(A))
-  # }
   lav_matrix_vec(t(A))
 }
 
 
 # Delta' A Delta product used by information-matrix calculations.
 lav_matrix_delta_A_delta <- function(delta, a1) {
+  if (is.matrix(delta) && is.matrix(a1) && is.double(delta) && is.double(a1)) {
+    out <- lav_cpp_delta_A_delta(delta, a1)
+    delta_names <- colnames(delta)
+    if (!is.null(delta_names)) {
+      dimnames(out) <- list(delta_names, delta_names)
+    }
+    return(out)
+  }
+
   crossprod(delta, a1) %*% delta
 }
 
@@ -41,6 +44,14 @@ lav_matrix_diag_prepost <- function(A, d) {
   if (length(d) == 0L) {
     return(A)
   }
+
+  if (is.matrix(A) && is.double(A) && is.double(d) &&
+      nrow(A) == ncol(A) && length(d) == nrow(A)) {
+    out <- lav_cpp_diag_prepost(A, d)
+    dimnames(out) <- dimnames(A)
+    return(out)
+  }
+
   A <- A * d
   t(t(A) * d)
 }
@@ -507,6 +518,34 @@ lav_matrix_duplication <- function(n = 1L) {
   x
 }
 
+lav_matrix_duplication_dimnames <- function(out, A, n,
+                                            rows = TRUE, cols = TRUE,
+                                            diagonal = TRUE) {
+  dn <- dimnames(A)
+  if (is.null(dn)) {
+    return(out)
+  }
+
+  row_names <- dn[[1L]]
+  col_names <- dn[[2L]]
+  idx <- NULL
+  if ((rows && !is.null(row_names)) || (cols && !is.null(col_names))) {
+    idx <- lav_matrix_vech_idx(n, diagonal = diagonal)
+  }
+
+  if (rows && !is.null(row_names)) {
+    row_names <- row_names[idx]
+  }
+  if (cols && !is.null(col_names)) {
+    col_names <- col_names[idx]
+  }
+  if (!is.null(row_names) || !is.null(col_names)) {
+    dimnames(out) <- list(row_names, col_names)
+  }
+
+  out
+}
+
 # compute t(D) %*% A (without explicitly computing D)
 # sqrt(nrow(A)) is an integer
 # A is not symmetric, and not even square, only n^2 ROWS
@@ -519,6 +558,13 @@ lav_matrix_duplication_pre <- function(A = matrix(0, 0, 0)) { # nolint
 
   # square nrow(A) only, n2 = n^2
   n <- as.integer(round(sqrt(n2)))
+  if (is.matrix(A) && is.double(A) && n * n == n2) {
+    out <- lav_cpp_duplication_pre(A)
+    return(lav_matrix_duplication_dimnames(out, A, n,
+      rows = TRUE, cols = FALSE
+    ))
+  }
+
   stopifnot(n * n == n2)
 
   # dup idx
@@ -544,6 +590,13 @@ lav_matrix_duplication_post <- function(A = matrix(0, 0, 0)) { # nolint
 
   # square A only, n2 = n^2
   n <- as.integer(round(sqrt(n2)))
+  if (is.matrix(A) && is.double(A) && n * n == n2) {
+    out <- lav_cpp_duplication_post(A)
+    return(lav_matrix_duplication_dimnames(out, A, n,
+      rows = FALSE, cols = TRUE
+    ))
+  }
+
   stopifnot(n * n == n2)
 
   # dup idx
@@ -569,6 +622,11 @@ lav_matrix_duplication_pre_post <- function(A = matrix(0, 0, 0)) { # nolint
 
   # square A only, n2 = n^2
   n <- as.integer(round(sqrt(n2)))
+  if (is.matrix(A) && is.double(A) && NROW(A) == n2 && n * n == n2) {
+    out <- lav_cpp_duplication_pre_post(A)
+    return(lav_matrix_duplication_dimnames(out, A, n))
+  }
+
   stopifnot(NROW(A) == n2, n * n == n2)
 
   # dup idx
@@ -596,6 +654,11 @@ lav_matrix_duplication_cor_pre_post <- function(a = matrix(0, 0, 0)) { # nolint
 
   # square A only, n2 = n^2
   n <- as.integer(round(sqrt(n2)))
+  if (is.matrix(a) && is.double(a) && NROW(a) == n2 && n * n == n2) {
+    out <- lav_cpp_duplication_cor_pre_post(a)
+    return(lav_matrix_duplication_dimnames(out, a, n, diagonal = FALSE))
+  }
+
   stopifnot(NROW(a) == n2, n * n == n2)
 
   # dup idx
@@ -658,6 +721,12 @@ lav_matrix_duplication_ginv_pre <- function(A = matrix(0, 0, 0)) { # nolint
   n <- as.integer(round(sqrt(n2)))
   stopifnot(n * n == n2)
   nstar <- n * (n + 1) / 2
+  if (is.double(m_a)) {
+    out <- lav_cpp_duplication_ginv_pre(m_a)
+    return(lav_matrix_duplication_dimnames(out, m_a, n,
+      rows = TRUE, cols = FALSE
+    ))
+  }
 
   idx1 <- lav_matrix_vech_idx(n)
   idx2 <- lav_matrix_vechru_idx(n)
@@ -676,6 +745,12 @@ lav_matrix_duplication_ginv_post <- function(A = matrix(0, 0, 0)) { #  nolint
   # square A only, n2 = n^2
   n <- as.integer(round(sqrt(n2)))
   stopifnot(n * n == n2)
+  if (is.double(m_a)) {
+    out <- lav_cpp_duplication_ginv_post(m_a)
+    return(lav_matrix_duplication_dimnames(out, m_a, n,
+      rows = FALSE, cols = TRUE
+    ))
+  }
 
   idx1 <- lav_matrix_vech_idx(n)
   idx2 <- lav_matrix_vechru_idx(n)
@@ -696,6 +771,10 @@ lav_matrix_duplication_ginv_pre_post <- function(A = matrix(0, 0, 0)) { # nolint
   # square A only, n2 = n^2
   n <- as.integer(round(sqrt(n2)))
   stopifnot(NROW(m_a) == n2, n * n == n2)
+  if (is.double(m_a)) {
+    out <- lav_cpp_duplication_ginv_pre_post(m_a)
+    return(lav_matrix_duplication_dimnames(out, m_a, n))
+  }
 
   idx1 <- lav_matrix_vech_idx(n)
   idx2 <- lav_matrix_vechru_idx(n)
@@ -1037,11 +1116,17 @@ lav_matrix_crossprod <- function(a, m_b) {
   }
 
   # A and B must be matrices
+  a_was_matrix <- inherits(a, "matrix")
+  b_was_matrix <- inherits(m_b, "matrix")
   if (!inherits(a, "matrix")) {
     a <- matrix(a)
   }
   if (!inherits(m_b, "matrix")) {
     m_b <- matrix(m_b)
+  }
+
+  if (a_was_matrix && b_was_matrix && is.double(a) && is.double(m_b)) {
+    return(lav_cpp_crossprod_na(a, m_b))
   }
 
   out <- apply(m_b, 2L, function(x) colSums(a * x, na.rm = TRUE))

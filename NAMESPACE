@@ -1,5 +1,5 @@
 # only when we have src code
-# useDynLib("lavaan")
+useDynLib("lavaan", .registration = TRUE, .fixes = "C_")
 
 importFrom("graphics",
            "abline", "axis", "box", "hist", "lines", "pairs", "par", "plot.default",

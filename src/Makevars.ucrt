@@ -1,0 +1,15 @@
+CXX_STD = CXX26
+CXX26STD = -std=c++26
+PKG_CXXFLAGS = -std=c++26
+
+LAVAAN_DEBUG_DEPS = ../../build/vcpkg-mingw-debug/_deps
+LAVAAN_RELEASE_DEPS = ../../build/vcpkg-mingw-release/_deps
+
+PKG_CPPFLAGS = \
+	-Iinclude \
+	-I$(LAVAAN_DEBUG_DEPS)/stdblas-src/include \
+	-I$(LAVAAN_DEBUG_DEPS)/stdblas-build/include/experimental \
+	-I$(LAVAAN_DEBUG_DEPS)/mdspan-src/include \
+	-I$(LAVAAN_RELEASE_DEPS)/stdblas-src/include \
+	-I$(LAVAAN_RELEASE_DEPS)/stdblas-build/include/experimental \
+	-I$(LAVAAN_RELEASE_DEPS)/mdspan-src/include
