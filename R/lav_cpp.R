@@ -8,6 +8,26 @@ lav_cpp_delta_A_delta <- function(delta, a1) {
   .Call(C_lav_cpp_delta_A_delta, delta, a1)
 }
 
+lav_cpp_commutation <- function(m, n) {
+  .Call(C_lav_cpp_commutation, m, n)
+}
+
+lav_cpp_commutation_pre <- function(A) {
+  .Call(C_lav_cpp_commutation_pre, A)
+}
+
+lav_cpp_commutation_post <- function(A) {
+  .Call(C_lav_cpp_commutation_post, A)
+}
+
+lav_cpp_commutation_pre_post <- function(A) {
+  .Call(C_lav_cpp_commutation_pre_post, A)
+}
+
+lav_cpp_commutation_mn_pre <- function(A, m, n) {
+  .Call(C_lav_cpp_commutation_mn_pre, A, m, n)
+}
+
 lav_cpp_duplication_pre <- function(A) {
   .Call(C_lav_cpp_duplication_pre, A)
 }
@@ -55,4 +75,8 @@ lav_cpp_crossprod_na <- function(a, m_b) {
 
 lav_cpp_diag_prepost <- function(A, d) {
   .Call(C_lav_cpp_diag_prepost, A, d)
+}
+
+lav_cpp_lisrel_sigma_fast <- function(lambda, psi, theta, delta = NULL) {
+  .Call(C_lav_cpp_lisrel_sigma_fast, lambda, psi, theta, delta)
 }

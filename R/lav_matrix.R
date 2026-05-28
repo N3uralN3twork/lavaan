@@ -820,16 +820,7 @@ lav_matrix_commutation <- function(m = 1L, n = 1L) {
     lav_msg_stop(gettext("n must be a positive integer"))
   }
 
-  p <- m * n
-  x <- numeric(p * p)
-
-  pattern <- rep(c(rep((m + 1L) * n, (m - 1L)), n + 1L), n)
-  idx <- c(1L, 1L + cumsum(pattern)[-p])
-
-  x[idx] <- 1.0
-  attr(x, "dim") <- c(p, p)
-
-  x
+  lav_cpp_commutation(as.integer(m), as.integer(n))
 }
 
 # compute K_n %*% A without explicitly computing K
@@ -847,6 +838,15 @@ lav_matrix_commutation_pre <- function(A = matrix(0, 0, 0)) {
 
   # K_nn only (n2 = m * n)
   n <- as.integer(round(sqrt(n2)))
+  if (is.double(A) && n * n == n2) {
+    out <- lav_cpp_commutation_pre(A)
+    dimnames(out) <- dimnames(A)
+    rownames(out) <- rownames(A)[
+      rep(seq_len(n), each = n) + (seq_len(n) - 1L) * n
+    ]
+    return(out)
+  }
+
   stopifnot(n * n == n2)
 
   # compute row indices
@@ -872,6 +872,15 @@ lav_matrix_commutation_post <- function(A = matrix(0, 0, 0)) { # nolint
 
   # K_nn only (n2 = m * n)
   n <- as.integer(round(sqrt(n2)))
+  if (is.double(m_a) && n * n == n2) {
+    out <- lav_cpp_commutation_post(m_a)
+    dimnames(out) <- dimnames(m_a)
+    colnames(out) <- colnames(m_a)[
+      rep(seq_len(n), each = n) + (seq_len(n) - 1L) * n
+    ]
+    return(out)
+  }
+
   stopifnot(n * n == n2)
 
   # compute col indices
@@ -895,6 +904,16 @@ lav_matrix_commutation_pre_post <- function(A = matrix(0, 0, 0)) { # nolint
 
   # K_nn only (n2 = m * n)
   n <- as.integer(round(sqrt(n2)))
+  if (is.double(m_a) && NROW(m_a) == n2 && n * n == n2) {
+    out <- lav_cpp_commutation_pre_post(m_a)
+    idx <- rep(seq_len(n), each = n) + (seq_len(n) - 1L) * n
+    dn <- dimnames(m_a)
+    if (!is.null(dn)) {
+      dimnames(out) <- list(dn[[1L]][idx], dn[[2L]][idx])
+    }
+    return(out)
+  }
+
   stopifnot(n * n == n2)
 
   # compute col indices
@@ -912,6 +931,15 @@ lav_matrix_commutation_mn_pre <- function(A, m = 1L, n = 1L) { # nolint
   # number of rows of A
   mn <- NROW(A)
   stopifnot(mn == m * n)
+
+  if (is.matrix(A) && is.double(A)) {
+    out <- lav_cpp_commutation_mn_pre(A, as.integer(m), as.integer(n))
+    dimnames(out) <- dimnames(A)
+    rownames(out) <- rownames(A)[
+      rep(seq_len(m), each = n) + (seq_len(n) - 1L) * m
+    ]
+    return(out)
+  }
 
   # compute row indices
   # row.idx <- as.integer(t(matrix(1:mn, m, n)))
@@ -995,6 +1023,19 @@ lav_matrix_bdiag <- function(...) {
   }
   if (length(mlist) == 1L) {
     return(mlist[[1]])
+  }
+
+  use_cpp <- all(vapply(mlist, function(x) {
+    is.double(x) && (is.null(dim(x)) || is.matrix(x))
+  }, logical(1L)))
+  if (use_cpp) {
+    out <- lav_cpp_bdiag(mlist)
+    cnames <- unlist(lapply(mlist, colnames))
+    rnames <- unlist(lapply(mlist, rownames))
+    if (nrow(out) == length(rnames) && ncol(out) == length(cnames)) {
+      dimnames(out) <- list(rnames, cnames)
+    }
+    return(out)
   }
 
   # more than 1 matrix

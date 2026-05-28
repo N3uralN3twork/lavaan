@@ -1042,12 +1042,12 @@ lav_lisrel_sigma <- function(mlist = NULL, delta = TRUE) {
   vyx
 }
 
-lav_lisrel_implied_fast <- function(mlist = NULL, th_idx = NULL,
-                                    need_sigma = FALSE,
-                                    need_mu = FALSE,
-                                    need_th = FALSE,
-                                    need_pi = FALSE,
-                                    delta = TRUE) {
+lav_lisrel_implied_fast_R <- function(mlist = NULL, th_idx = NULL,
+                                      need_sigma = FALSE,
+                                      need_mu = FALSE,
+                                      need_th = FALSE,
+                                      need_pi = FALSE,
+                                      delta = TRUE) {
   mm_lambda <- mlist$lambda
   nvar <- nrow(mm_lambda)
   mm_beta <- mlist$beta
@@ -1208,6 +1208,62 @@ lav_lisrel_implied_fast <- function(mlist = NULL, th_idx = NULL,
   }
 
   out
+}
+
+lav_lisrel_implied_fast <- function(mlist = NULL, th_idx = NULL,
+                                    need_sigma = FALSE,
+                                    need_mu = FALSE,
+                                    need_th = FALSE,
+                                    need_pi = FALSE,
+                                    delta = TRUE) {
+  use_cpp_sigma <- need_sigma &&
+    !need_mu && !need_th && !need_pi &&
+    is.null(mlist$beta) &&
+    is.null(mlist$wmat) &&
+    is.matrix(mlist$lambda) && is.double(mlist$lambda) &&
+    is.matrix(mlist$psi) && is.double(mlist$psi) &&
+    is.matrix(mlist$theta) && is.double(mlist$theta) &&
+    (!delta || is.null(mlist$delta) ||
+      (is.matrix(mlist$delta) && is.double(mlist$delta) &&
+        ncol(mlist$delta) >= 1L))
+
+  if (!use_cpp_sigma) {
+    return(lav_lisrel_implied_fast_R(
+      mlist = mlist,
+      th_idx = th_idx,
+      need_sigma = need_sigma,
+      need_mu = need_mu,
+      need_th = need_th,
+      need_pi = need_pi,
+      delta = delta
+    ))
+  }
+
+  delta_diag <- NULL
+  if (delta && !is.null(mlist$delta)) {
+    delta_diag <- mlist$delta[, 1L]
+  }
+
+  sigma <- lav_cpp_lisrel_sigma_fast(
+    lambda = mlist$lambda,
+    psi = mlist$psi,
+    theta = mlist$theta,
+    delta = delta_diag
+  )
+
+  sigma_dimnames <- dimnames(mlist$theta)
+  if (is.null(sigma_dimnames) ||
+      (is.null(sigma_dimnames[[1L]]) && is.null(sigma_dimnames[[2L]]))) {
+    lambda_names <- rownames(mlist$lambda)
+    if (!is.null(lambda_names)) {
+      sigma_dimnames <- list(lambda_names, lambda_names)
+    }
+  }
+  if (!is.null(sigma_dimnames)) {
+    dimnames(sigma) <- sigma_dimnames
+  }
+
+  list(sigma = sigma)
 }
 
 
