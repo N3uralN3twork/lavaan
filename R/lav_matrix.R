@@ -1,6 +1,9 @@
 # Magnus & Neudecker (1999) style matrix operations
 # YR - 11 may 2011: initial version
 # YR - 19 okt 2014: rename functions using lav_matrix_ prefix
+# Validation-first note:
+# keep these R implementations as the reference path while Rust kernels are
+# staged under `lavaan/rust/lavaan-kernels/`.
 
 # vec operator
 #
@@ -32,15 +35,38 @@ lav_matrix_vecr <- function(A) {         # nolint
 
 # Delta' A Delta product used by information-matrix calculations.
 lav_matrix_delta_A_delta <- function(delta, a1) {
+  if (lav_rust_backend_available() && is.matrix(delta) && is.matrix(a1)) {
+    rust_result <- try(lav_rust_lav_matrix_delta_A_delta(delta, a1), silent = TRUE)
+    if (!inherits(rust_result, "try-error")) {
+      return(rust_result)
+    }
+  }
+
   crossprod(delta, a1) %*% delta
 }
 
 
 lav_matrix_diag_prepost <- function(A, d) {
+  # This remains the validation implementation for now.
+  # The Rust equivalent will be wired in behind this wrapper.
   d <- as.vector(d)
   if (length(d) == 0L) {
     return(A)
   }
+
+  if (
+    lav_rust_backend_available() &&
+      is.matrix(A) &&
+      is.numeric(A) &&
+      nrow(A) == ncol(A) &&
+      length(d) == nrow(A)
+  ) {
+    rust_result <- try(lav_rust_lav_matrix_diag_prepost(A, d), silent = TRUE)
+    if (!inherits(rust_result, "try-error")) {
+      return(rust_result)
+    }
+  }
+
   A <- A * d
   t(t(A) * d)
 }

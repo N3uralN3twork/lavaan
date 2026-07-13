@@ -1,0 +1,8 @@
+RUST_CRATE_DIR = ../rust/lavaan-kernels
+RUST_TARGET_DIR = ../../target
+RUST_DLL = $(RUST_TARGET_DIR)/release/lavaan_kernels.dll
+
+$(SHLIB): $(RUST_DLL)
+
+$(RUST_DLL):
+	cd $(RUST_CRATE_DIR) && CARGO_TARGET_DIR=$(RUST_TARGET_DIR) cargo build --release --lib

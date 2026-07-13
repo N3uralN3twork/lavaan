@@ -1,0 +1,23 @@
+[package]
+name = "lavaan-kernels"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+faer = { version = "0.24.4", default-features = false, features = ["std"] }
+polars = "0.54.4"
+
+[lib]
+name = "lavaan_kernels"
+path = "src/lib.rs"
+crate-type = ["rlib", "cdylib"]
+
+[[bin]]
+name = "lav_matrix"
+path = "src/bin/lav_matrix.rs"
+
+[[bench]]
+name = "lav_matrix"
+path = "benches/lav_matrix.rs"
+harness = false

@@ -1,3 +1,9 @@
+.onLoad <- function(libname, pkgname) {
+  if (exists("lav_rust_prepare_backend", mode = "function", inherits = TRUE)) {
+    lav_rust_prepare_backend()
+  }
+}
+
 .onAttach <- function(libname, pkgname) {
   version <- read.dcf(
     file = system.file("DESCRIPTION", package = pkgname),

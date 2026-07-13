@@ -1,5 +1,5 @@
 # only when we have src code
-# useDynLib("lavaan")
+useDynLib("lavaan", .registration = TRUE)
 
 importFrom("graphics",
            "abline", "axis", "box", "hist", "lines", "pairs", "par", "plot.default",
@@ -66,6 +66,7 @@ export("lavaan", "cfa", "sem", "growth",
        "lav_getcov", "lav_char2num", "lav_cor2cov",
        "getCov", "char2num", "cor2cov",                 # old names
        "lavOptions",
+       "lav_backend_available", "lav_backend_mode", "lav_backend_use", "lav_backend_reset",
 #      "lav_use_lavaanC",
        "modindices", "modificationIndices", "modificationindices",
        "standardizedSolution", "standardizedsolution",
