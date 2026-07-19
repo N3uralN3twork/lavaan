@@ -1,9 +1,27 @@
 //! Experimental Rust kernels for lavaan performance candidates.
 
-pub mod ffi;
 pub mod helpers;
+pub mod lav_model_estimate;
+pub mod lav_model_gradient;
+pub mod lav_model_vcov;
 
-use faer::{Mat, MatRef};
+use ndarray::{Array2, ArrayView2, ShapeBuilder};
+
+pub use lav_model_estimate::{
+    lav_model_estimate_gradient_postprocess, lav_model_estimate_pack, lav_model_estimate_unpack,
+    lav_model_estimate_unpack_unscale,
+};
+pub use lav_model_gradient::{
+    lav_model_gradient_conditional_x_sample_cache, lav_model_gradient_delta_post,
+    lav_model_gradient_duplication_pre, lav_model_gradient_dwls, lav_model_gradient_group_weight,
+    lav_model_gradient_ml_conditional, lav_model_gradient_ml_conditional_post,
+    lav_model_gradient_ml_group, lav_model_gradient_ntrls_post, lav_model_gradient_omega_gls,
+    lav_model_gradient_omega_missing_pattern, lav_model_gradient_omega_ml,
+    lav_model_gradient_t_d1_delta, lav_model_gradient_wls, ConditionalXSampleCache, MlOmega,
+};
+pub use lav_model_vcov::{
+    lav_model_vcov_delta_a_delta, lav_model_vcov_jacobian_vcov_jacobian_t, lav_model_vcov_sandwich,
+};
 
 /// Compute `t(delta) %*% a1 %*% delta` for R-style column-major matrices.
 ///
@@ -37,23 +55,26 @@ pub fn delta_a_delta(delta: &[f64], a1: &[f64], m: usize, n: usize) -> Result<Ve
         ));
     }
 
-    let delta_mat = MatRef::from_column_major_slice(delta, m, n);
-    let a1_mat = MatRef::from_column_major_slice(a1, m, m);
-    let result = delta_mat.transpose() * a1_mat * delta_mat;
+    let delta_mat = ArrayView2::from_shape((m, n).f(), delta)
+        .map_err(|err| format!("delta shape error: {err}"))?;
+    let a1_mat =
+        ArrayView2::from_shape((m, m).f(), a1).map_err(|err| format!("a1 shape error: {err}"))?;
+    let left = delta_mat.t().dot(&a1_mat);
+    let result = left.dot(&delta_mat);
 
-    Ok(mat_to_column_major_vec(&result))
+    Ok(array_to_column_major_vec(&result))
 }
 
-fn mat_to_column_major_vec(mat: &Mat<f64>) -> Vec<f64> {
-    let mut out = Vec::with_capacity(mat.nrows() * mat.ncols());
-    for col in 0..mat.ncols() {
-        out.extend_from_slice(mat.col_as_slice(col));
+fn array_to_column_major_vec(array: &Array2<f64>) -> Vec<f64> {
+    let mut out = Vec::with_capacity(array.nrows() * array.ncols());
+    for col in 0..array.ncols() {
+        out.extend(array.column(col).iter().copied());
     }
     out
 }
 
 /// Column/row scaling helper used by the validation R wrapper.
-pub fn lav_matrix_diag_prepost(a: &Mat<f64>, d: &[f64]) -> Mat<f64> {
+pub fn lav_matrix_diag_prepost(a: &Array2<f64>, d: &[f64]) -> Array2<f64> {
     if d.is_empty() {
         return a.clone();
     }
@@ -61,7 +82,7 @@ pub fn lav_matrix_diag_prepost(a: &Mat<f64>, d: &[f64]) -> Mat<f64> {
     debug_assert_eq!(a.nrows(), d.len(), "d must match A's row count");
     debug_assert_eq!(a.ncols(), d.len(), "d must match A's column count");
 
-    Mat::from_fn(a.nrows(), a.ncols(), |i, j| a[(i, j)] * d[i] * d[j])
+    Array2::from_shape_fn((a.nrows(), a.ncols()).f(), |(i, j)| a[(i, j)] * d[i] * d[j])
 }
 
 pub fn lav_matrix_diagh_idx(n: usize) -> Vec<usize> {
@@ -150,59 +171,43 @@ pub fn lav_matrix_vechru_idx(n: usize, diagonal: bool) -> Vec<usize> {
     triangular_indices(n, diagonal, TriangularOrder::RowUpper)
 }
 
-pub fn lav_matrix_vech(
-    values: &[f64],
-    n: usize,
-    diagonal: bool,
-) -> Result<Vec<f64>, String> {
+pub fn lav_matrix_vech(values: &[f64], n: usize, diagonal: bool) -> Result<Vec<f64>, String> {
     triangular_extract(values, n, diagonal, TriangularOrder::ColumnLower)
 }
 
-pub fn lav_matrix_vechr(
-    values: &[f64],
-    n: usize,
-    diagonal: bool,
-) -> Result<Vec<f64>, String> {
+pub fn lav_matrix_vechr(values: &[f64], n: usize, diagonal: bool) -> Result<Vec<f64>, String> {
     triangular_extract(values, n, diagonal, TriangularOrder::RowLower)
 }
 
-pub fn lav_matrix_vechu(
-    values: &[f64],
-    n: usize,
-    diagonal: bool,
-) -> Result<Vec<f64>, String> {
+pub fn lav_matrix_vechu(values: &[f64], n: usize, diagonal: bool) -> Result<Vec<f64>, String> {
     triangular_extract(values, n, diagonal, TriangularOrder::ColumnUpper)
 }
 
-pub fn lav_matrix_vechru(
-    values: &[f64],
-    n: usize,
-    diagonal: bool,
-) -> Result<Vec<f64>, String> {
+pub fn lav_matrix_vechru(values: &[f64], n: usize, diagonal: bool) -> Result<Vec<f64>, String> {
     triangular_extract(values, n, diagonal, TriangularOrder::RowUpper)
 }
 
-pub fn lav_matrix_vech_reverse(values: &[f64], diagonal: bool) -> Result<Mat<f64>, String> {
+pub fn lav_matrix_vech_reverse(values: &[f64], diagonal: bool) -> Result<Array2<f64>, String> {
     triangular_full(values, diagonal, TriangularOrder::ColumnLower)
 }
 
-pub fn lav_matrix_vechru_reverse(values: &[f64], diagonal: bool) -> Result<Mat<f64>, String> {
+pub fn lav_matrix_vechru_reverse(values: &[f64], diagonal: bool) -> Result<Array2<f64>, String> {
     triangular_full(values, diagonal, TriangularOrder::RowUpper)
 }
 
-pub fn lav_matrix_upper2full(values: &[f64], diagonal: bool) -> Result<Mat<f64>, String> {
+pub fn lav_matrix_upper2full(values: &[f64], diagonal: bool) -> Result<Array2<f64>, String> {
     triangular_full(values, diagonal, TriangularOrder::ColumnUpper)
 }
 
-pub fn lav_matrix_vechr_reverse(values: &[f64], diagonal: bool) -> Result<Mat<f64>, String> {
+pub fn lav_matrix_vechr_reverse(values: &[f64], diagonal: bool) -> Result<Array2<f64>, String> {
     triangular_full(values, diagonal, TriangularOrder::RowLower)
 }
 
-pub fn lav_matrix_vechu_reverse(values: &[f64], diagonal: bool) -> Result<Mat<f64>, String> {
+pub fn lav_matrix_vechu_reverse(values: &[f64], diagonal: bool) -> Result<Array2<f64>, String> {
     triangular_full(values, diagonal, TriangularOrder::ColumnUpper)
 }
 
-pub fn lav_matrix_lower2full(values: &[f64], diagonal: bool) -> Result<Mat<f64>, String> {
+pub fn lav_matrix_lower2full(values: &[f64], diagonal: bool) -> Result<Array2<f64>, String> {
     triangular_full(values, diagonal, TriangularOrder::ColumnLower)
 }
 
@@ -258,7 +263,7 @@ fn triangular_full(
     values: &[f64],
     diagonal: bool,
     order: TriangularOrder,
-) -> Result<Mat<f64>, String> {
+) -> Result<Array2<f64>, String> {
     let expected_len = if diagonal {
         triangular_count_with_diagonal(values.len())?
     } else {
@@ -275,7 +280,7 @@ fn triangular_full(
         ));
     }
 
-    Ok(Mat::from_fn(n, n, |row, col| {
+    Ok(Array2::from_shape_fn((n, n).f(), |(row, col)| {
         if let Some(pos) = triangular_position(row, col, n, diagonal, order) {
             values[pos]
         } else if let Some(pos) = triangular_position(col, row, n, diagonal, order) {
@@ -405,7 +410,10 @@ fn triangular_count_with_diagonal(len: usize) -> Result<(usize, usize), String> 
     let root = (disc as f64).sqrt() as usize;
     let n = (root - 1) / 2;
     if n * (n + 1) / 2 != len {
-        return Err(format!("vector length {} is not triangular with diagonal", len));
+        return Err(format!(
+            "vector length {} is not triangular with diagonal",
+            len
+        ));
     }
     Ok((n, len))
 }
@@ -415,7 +423,10 @@ fn triangular_count_without_diagonal(len: usize) -> Result<(usize, usize), Strin
     let root = (disc as f64).sqrt() as usize;
     let n = (root + 1) / 2;
     if n * (n - 1) / 2 != len {
-        return Err(format!("vector length {} is not triangular without diagonal", len));
+        return Err(format!(
+            "vector length {} is not triangular without diagonal",
+            len
+        ));
     }
     Ok((n, len))
 }

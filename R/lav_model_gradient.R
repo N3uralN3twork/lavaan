@@ -5,6 +5,28 @@ lav_model_gradient_conditional_x_sample_cache <- function(lavsamplestats = NULL,
   lapply(seq_len(nblocks), function(g) {
     mean_x <- lavsamplestats@mean.x[[g]]
     cov_x <- lavsamplestats@cov.x[[g]]
+    if (lav_rust_backend_available()) {
+      rust_cache <- lav_rust_try_model_gradient(
+        lav_native_lav_model_gradient_conditional_x_sample_cache(
+          mean_x = mean_x,
+          cov_x = cov_x,
+          res_int = lavsamplestats@res.int[[g]],
+          res_slopes = lavsamplestats@res.slopes[[g]]
+        ),
+        silent = TRUE
+      )
+      if (!is.null(rust_cache) && !inherits(rust_cache, "try-error")) {
+        dimnames(rust_cache$c3) <- dimnames(rbind(
+          c(1, mean_x),
+          cbind(mean_x, cov_x + tcrossprod(mean_x))
+        ))
+        dimnames(rust_cache$obs) <- dimnames(t(cbind(
+          lavsamplestats@res.int[[g]],
+          lavsamplestats@res.slopes[[g]]
+        )))
+        return(rust_cache)
+      }
+    }
     list(
       c3 = rbind(
         c(1, mean_x),
@@ -16,6 +38,51 @@ lav_model_gradient_conditional_x_sample_cache <- function(lavsamplestats = NULL,
       ))
     )
   })
+}
+
+lav_model_gradient_delta_reference <- function(lavmodel = NULL, glist = NULL,
+                                               m_el_idx = NULL, x_el_idx = NULL,
+                                               ceq_simple = FALSE) {
+  old_backend <- getOption("lavaan.backend", default = NULL)
+  old_env <- Sys.getenv("LAVAAN_BACKEND", unset = NA_character_)
+  on.exit({
+    if (is.null(old_backend)) {
+      options(lavaan.backend = NULL)
+    } else {
+      options(lavaan.backend = old_backend)
+    }
+    if (is.na(old_env)) {
+      Sys.unsetenv("LAVAAN_BACKEND")
+    } else {
+      Sys.setenv(LAVAAN_BACKEND = old_env)
+    }
+  }, add = TRUE)
+
+  options(lavaan.backend = "r")
+  Sys.setenv(LAVAAN_BACKEND = "r")
+  lav_model_delta(
+    lavmodel = lavmodel,
+    glist = glist,
+    m_el_idx = m_el_idx,
+    x_el_idx = x_el_idx,
+    ceq_simple = ceq_simple
+  )
+}
+
+lav_model_gradient_ceq_simple_dx <- function(k = NULL, dx = NULL) {
+  rust_dx <- lav_rust_try_model_gradient(
+    lav_native_lav_model_gradient_delta_post(
+      delta = k,
+      post = dx,
+      scale = 1.0
+    ),
+    silent = TRUE
+  )
+  if (!is.null(rust_dx) && !inherits(rust_dx, "try-error")) {
+    return(rust_dx)
+  }
+
+  drop(crossprod(k, dx))
 }
 
 lav_model_gradient <- function(lavmodel = NULL,
@@ -247,7 +314,7 @@ lav_model_gradient <- function(lavmodel = NULL,
     if (type == "free") {
       if (lavmodel@ceq.simple.only) { # new in 0.6-11
         if (ceq_simple) {
-          dx <- drop(crossprod(lavmodel@ceq.simple.K, dx))
+          dx <- lav_model_gradient_ceq_simple_dx(lavmodel@ceq.simple.K, dx)
         }
       }
     } else {
@@ -290,7 +357,7 @@ lav_model_gradient <- function(lavmodel = NULL,
       omega_mu <- vector("list", length = lavmodel@nblocks)
     }
 
-    delta <- lav_model_delta(lavmodel = lavmodel, glist = glist)
+    delta <- lav_model_gradient_delta_reference(lavmodel = lavmodel, glist = glist)
 
     if (lavmodel@ceq.simple.only) {
       dx <- numeric(lavmodel@nx.unco)
@@ -302,26 +369,42 @@ lav_model_gradient <- function(lavmodel = NULL,
      # <- 0.5 * group.fx for ML/REML/NTRLS/catML), so dF/dphi has a 0.5
      # factor relative to the textbook ML loss.
     for (g in 1:lavmodel@nblocks) {
-      post_sigma_1 <- -0.5 * lav_matrix_duplication_pre(
-        matrix(omega[[g]], ncol = 1L))
-      if (meanstructure) {
-        post_mu <- -1 * as.numeric(omega_mu[[g]])
-        post <- c(post_mu, post_sigma_1)
+      rust_group_dx <- lav_rust_try_model_gradient(
+        lav_native_lav_model_gradient_ml_group(
+          delta = delta[[g]],
+          omega = omega[[g]],
+          omega_mu = if (meanstructure) omega_mu[[g]] else numeric(0L),
+          group_weight = group_w[g],
+          meanstructure = meanstructure,
+          group_weight_free = lavmodel@group.w.free
+        ),
+        silent = TRUE
+      )
+      if (!is.null(rust_group_dx) && !inherits(rust_group_dx, "try-error")) {
+        group_dx <- rust_group_dx
       } else {
-        post <- post_sigma_1
+        post_sigma_1 <- -0.5 * lav_matrix_duplication_pre(
+          matrix(omega[[g]], ncol = 1L))
+        if (meanstructure) {
+          post_mu <- -1 * as.numeric(omega_mu[[g]])
+          post <- c(post_mu, post_sigma_1)
+        } else {
+          post <- post_sigma_1
+        }
+        # Delta rows: [gw (if group.w.free) | mu (if meanstructure) | vech(Sigma)]
+        # group weight is overwritten below via the explicit Poisson term, so
+        # pad POST with a leading zero when needed (gradient there is set later)
+        if (lavmodel@group.w.free) {
+          post <- c(0, post)
+        }
+        group_dx <- as.numeric(crossprod(delta[[g]], post))
+        group_dx <- group_w[g] * group_dx
       }
-      # Delta rows: [gw (if group.w.free) | mu (if meanstructure) | vech(Sigma)]
-      # group weight is overwritten below via the explicit Poisson term, so
-      # pad POST with a leading zero when needed (gradient there is set later)
-      if (lavmodel@group.w.free) {
-        post <- c(0, post)
-      }
-      group_dx <- as.numeric(crossprod(delta[[g]], post))
-      dx <- dx + group_w[g] * group_dx
+      dx <- dx + group_dx
     }
 
     if (lavmodel@ceq.simple.only && ceq_simple) {
-      dx <- drop(crossprod(lavmodel@ceq.simple.K, dx))
+      dx <- lav_model_gradient_ceq_simple_dx(lavmodel@ceq.simple.K, dx)
     }
   } else # ML + composites
 
@@ -333,7 +416,7 @@ lav_model_gradient <- function(lavmodel = NULL,
       }
       # stop("FIXME: WLS gradient with type != free needs fixing!")
     } else {
-      delta <- lav_model_delta(lavmodel = lavmodel, glist = glist)
+      delta <- lav_model_gradient_delta_reference(lavmodel = lavmodel, glist = glist)
     }
 
     for (g in 1:lavmodel@nblocks) {
@@ -350,10 +433,23 @@ lav_model_gradient <- function(lavmodel = NULL,
         # full weight matrix
         if (estimator == "GLS" || estimator == "WLS") {
           wls_v <- lavsamplestats@WLS.V[[g]]
-          group_dx <- -1 * crossprod(
-            delta[[g]],
-            crossprod(wls_v, diff)
+          rust_group_dx <- lav_rust_try_model_gradient(
+            lav_native_lav_model_gradient_wls(
+              delta = delta[[g]],
+              wls_v = wls_v,
+              diff = diff,
+              group_weight = 1.0
+            ),
+            silent = TRUE
           )
+          if (!is.null(rust_group_dx) && !inherits(rust_group_dx, "try-error")) {
+            group_dx <- rust_group_dx
+          } else {
+            group_dx <- -1 * crossprod(
+              delta[[g]],
+              crossprod(wls_v, diff)
+            )
+          }
         } else if (estimator == "DLS") {
           if (estimator_args$dls.GammaNT == "sample") {
             wls_v <- lavsamplestats@WLS.V[[g]] # for now
@@ -371,10 +467,23 @@ lav_model_gradient <- function(lavmodel = NULL,
             w_dls <- (1 - dls_a) * lavsamplestats@NACOV[[g]] + dls_a * gamma_nt
             wls_v <- lav_matrix_symmetric_inverse(w_dls)
           }
-          group_dx <- -1 * crossprod(
-            delta[[g]],
-            crossprod(wls_v, diff)
+          rust_group_dx <- lav_rust_try_model_gradient(
+            lav_native_lav_model_gradient_wls(
+              delta = delta[[g]],
+              wls_v = wls_v,
+              diff = diff,
+              group_weight = 1.0
+            ),
+            silent = TRUE
           )
+          if (!is.null(rust_group_dx) && !inherits(rust_group_dx, "try-error")) {
+            group_dx <- rust_group_dx
+          } else {
+            group_dx <- -1 * crossprod(
+              delta[[g]],
+              crossprod(wls_v, diff)
+            )
+          }
         } else if (estimator == "NTRLS") {
           stopifnot(!conditional_x)
           # WLS.V <- lav_samplestats_gamma_inverse_nt(
@@ -392,9 +501,22 @@ lav_model_gradient <- function(lavmodel = NULL,
           sigma_inv <- attr(sigma_1, "inv")
           nvar <- NROW(sigma_1)
 
-          if (meanstructure) {
-            mean_1 <- lavsamplestats@mean[[g]]
-            mu <- mu_hat[[g]]
+          mean_1 <- if (meanstructure) lavsamplestats@mean[[g]] else numeric(0L)
+          mu <- if (meanstructure) mu_hat[[g]] else numeric(0L)
+          rust_post <- lav_rust_try_model_gradient(
+            lav_native_lav_model_gradient_ntrls_post(
+              sample_cov = s,
+              model_cov = sigma_1,
+              sigma_inv = sigma_inv,
+              mean_observed = mean_1,
+              mean_model = mu,
+              meanstructure = meanstructure
+            ),
+            silent = TRUE
+          )
+          if (!is.null(rust_post) && !inherits(rust_post, "try-error")) {
+            post <- rust_post
+          } else if (meanstructure) {
             post_sigma_1 <- lav_matrix_duplication_pre(
               matrix(
                 (sigma_inv %*% (s - sigma_1) %*% t(sigma_inv)) %*%
@@ -412,15 +534,40 @@ lav_model_gradient <- function(lavmodel = NULL,
             )
           }
 
-          group_dx <- as.numeric(-1 * crossprod(delta[[g]], post))
+          rust_group_dx <- lav_rust_try_model_gradient(
+            lav_native_lav_model_gradient_delta_post(
+              delta = delta[[g]],
+              post = post,
+              scale = -1.0
+            ),
+            silent = TRUE
+          )
+          if (!is.null(rust_group_dx) && !inherits(rust_group_dx, "try-error")) {
+            group_dx <- rust_group_dx
+          } else {
+            group_dx <- as.numeric(-1 * crossprod(delta[[g]], post))
+          }
         }
       } else if (estimator == "DWLS" || estimator == "ULS") {
         # diagonal weight matrix
         diff <- lavsamplestats@WLS.obs[[g]] - wls_est[[g]]
-        group_dx <- -1 * crossprod(
-          delta[[g]],
-          lavsamplestats@WLS.VD[[g]] * diff
+        rust_group_dx <- lav_rust_try_model_gradient(
+          lav_native_lav_model_gradient_dwls(
+            delta = delta[[g]],
+            wls_vd = lavsamplestats@WLS.VD[[g]],
+            diff = diff,
+            group_weight = 1.0
+          ),
+          silent = TRUE
         )
+        if (!is.null(rust_group_dx) && !inherits(rust_group_dx, "try-error")) {
+          group_dx <- rust_group_dx
+        } else {
+          group_dx <- -1 * crossprod(
+            delta[[g]],
+            lavsamplestats@WLS.VD[[g]] * diff
+          )
+        }
       }
 
       group_dx <- group_w[g] * group_dx
@@ -453,7 +600,7 @@ lav_model_gradient <- function(lavmodel = NULL,
       }
       # stop("FIXME: WLS gradient with type != free needs fixing!")
     } else {
-      delta <- lav_model_delta(lavmodel = lavmodel, glist = glist)
+      delta <- lav_model_gradient_delta_reference(lavmodel = lavmodel, glist = glist)
     }
 
     conditional_x_sample_cache <-
@@ -475,53 +622,80 @@ lav_model_gradient <- function(lavmodel = NULL,
 
       # beta
       obs <- conditional_x_sample_cache[[g]]$obs
-      est <- t(cbind(mu_g, pi_g))
-      # obs.beta <- c(lavsamplestats@res.int[[g]],
-      #              lav_matrix_vec(lavsamplestats@res.slopes[[g]]))
-      # est.beta <- c(Mu.g,  lav_matrix_vec(PI.g))
-      # beta.COV <- C3 %x% Sigma.inv
+      rust_post <- lav_rust_try_model_gradient(
+        lav_native_lav_model_gradient_ml_conditional_post(
+          c3 = c3,
+          obs = obs,
+          mu = mu_g,
+          pi = pi_g,
+          sigma_inv = sigma_inv,
+          res_cov = s
+        ),
+        silent = TRUE
+      )
+      if (!is.null(rust_post) && !inherits(rust_post, "try-error")) {
+        post <- rust_post
+      } else {
+        est <- t(cbind(mu_g, pi_g))
+        # obs.beta <- c(lavsamplestats@res.int[[g]],
+        #              lav_matrix_vec(lavsamplestats@res.slopes[[g]]))
+        # est.beta <- c(Mu.g,  lav_matrix_vec(PI.g))
+        # beta.COV <- C3 %x% Sigma.inv
 
-      # a <- t(obs.beta - est.beta)
-      # b <- as.matrix(obs.beta - est.beta)
-      # K <- lav_matrix_commutation(m = nvar, n = nvar)
-      # AB <- (K %x% diag(NROW(C3)*NROW(C3))) %*%
-      #          (diag(nvar) %x% lav_matrix_vec(C3) %x% diag(nvar))
-      # K <- lav_matrix_commutation(m = nvar, n = NROW(C3))
-      # AB <- ( diag(NROW(C3)) %x% K %x% diag(nvar) ) %*%
-      #        (lav_matrix_vec(C3) %x% diag( nvar * nvar) )
+        # a <- t(obs.beta - est.beta)
+        # b <- as.matrix(obs.beta - est.beta)
+        # K <- lav_matrix_commutation(m = nvar, n = nvar)
+        # AB <- (K %x% diag(NROW(C3)*NROW(C3))) %*%
+        #          (diag(nvar) %x% lav_matrix_vec(C3) %x% diag(nvar))
+        # K <- lav_matrix_commutation(m = nvar, n = NROW(C3))
+        # AB <- ( diag(NROW(C3)) %x% K %x% diag(nvar) ) %*%
+        #        (lav_matrix_vec(C3) %x% diag( nvar * nvar) )
 
-      # POST.beta <- 2 *  beta.COV %*% (obs.beta - est.beta)
-      diff <- obs - est
-      c3_diff <- c3 %*% diff
-      d_beta <- c3_diff %*% sigma_inv
-      # NOTE: the vecr here, unlike lav_mvreg_dlogl_beta
-      #       this is because DELTA has used vec(t(BETA)),
-      #       instead of vec(BETA)
-      # POST.beta <- 2 * lav_matrix_vecr(d.BETA)
-      # NOT any longer, since 0.6-1!!!
-      post_beta <- 2 * lav_matrix_vec(d_beta)
+        # POST.beta <- 2 *  beta.COV %*% (obs.beta - est.beta)
+        diff <- obs - est
+        c3_diff <- c3 %*% diff
+        d_beta <- c3_diff %*% sigma_inv
+        # NOTE: the vecr here, unlike lav_mvreg_dlogl_beta
+        #       this is because DELTA has used vec(t(BETA)),
+        #       instead of vec(BETA)
+        # POST.beta <- 2 * lav_matrix_vecr(d.BETA)
+        # NOT any longer, since 0.6-1!!!
+        post_beta <- 2 * lav_matrix_vec(d_beta)
 
-      # POST.sigma1 <- lav_matrix_duplication_pre(
-      #        (Sigma.inv %x% Sigma.inv)  %*% t(AB)  %*% (t(a) %x% b) )
+        # POST.sigma1 <- lav_matrix_duplication_pre(
+        #        (Sigma.inv %x% Sigma.inv)  %*% t(AB)  %*% (t(a) %x% b) )
 
-      # Sigma
-      # POST.sigma2 <- lav_matrix_duplication_pre(
-      #                 matrix( lav_matrix_vec(
-      #          Sigma.inv %*% (S - Sigma) %*% t(Sigma.inv)), ncol = 1L))
-      w_tilde <- s + crossprod(diff, c3_diff)
-      d_sigma <- (sigma_inv - sigma_inv %*% w_tilde %*% sigma_inv)
-      d_vech_sigma <- as.numeric(lav_matrix_duplication_pre(
-        as.matrix(lav_matrix_vec(d_sigma))
-      ))
-      post_sigma <- -1 * d_vech_sigma
+        # Sigma
+        # POST.sigma2 <- lav_matrix_duplication_pre(
+        #                 matrix( lav_matrix_vec(
+        #          Sigma.inv %*% (S - Sigma) %*% t(Sigma.inv)), ncol = 1L))
+        w_tilde <- s + crossprod(diff, c3_diff)
+        d_sigma <- (sigma_inv - sigma_inv %*% w_tilde %*% sigma_inv)
+        d_vech_sigma <- as.numeric(lav_matrix_duplication_pre(
+          as.matrix(lav_matrix_vec(d_sigma))
+        ))
+        post_sigma <- -1 * d_vech_sigma
 
-      # POST <- c(POST.beta, POST.sigma1 + POST.sigma2)
-      post <- c(post_beta, post_sigma)
+        # POST <- c(POST.beta, POST.sigma1 + POST.sigma2)
+        post <- c(post_beta, post_sigma)
+      }
 
-      group_dx <- as.numeric(-1 * crossprod(delta[[g]], post))
+      rust_group_dx <- lav_rust_try_model_gradient(
+        lav_native_lav_model_gradient_ml_conditional(
+          delta = delta[[g]],
+          post = post,
+          group_weight = 1.0
+        ),
+        silent = TRUE
+      )
+      if (!is.null(rust_group_dx) && !inherits(rust_group_dx, "try-error")) {
+        group_dx <- rust_group_dx
+      } else {
+        group_dx <- as.numeric(-1 * crossprod(delta[[g]], post))
 
-      # because we still use obj/2, we need to divide by 2!
-      group_dx <- group_dx / 2 # fixed in 0.6-1
+        # because we still use obj/2, we need to divide by 2!
+        group_dx <- group_dx / 2 # fixed in 0.6-1
+      }
 
       group_dx <- group_w[g] * group_dx
       if (g == 1) {
@@ -549,7 +723,7 @@ lav_model_gradient <- function(lavmodel = NULL,
       lav_msg_fixme("type != free in lav_model_gradient for
                     estimator ML for nlevels > 1")
     } else {
-      delta <- lav_model_delta(lavmodel = lavmodel, glist = glist)
+      delta <- lav_model_gradient_delta_reference(lavmodel = lavmodel, glist = glist)
     }
 
     # for each upper-level group....
@@ -598,7 +772,19 @@ lav_model_gradient <- function(lavmodel = NULL,
         }
       }
 
-      group_dx <- as.numeric(dx_1 %*% delta[[g]])
+      rust_group_dx <- lav_rust_try_model_gradient(
+        lav_native_lav_model_gradient_delta_post(
+          delta = delta[[g]],
+          post = as.numeric(dx_1),
+          scale = 1.0
+        ),
+        silent = TRUE
+      )
+      if (!is.null(rust_group_dx) && !inherits(rust_group_dx, "try-error")) {
+        group_dx <- rust_group_dx
+      } else {
+        group_dx <- as.numeric(dx_1 %*% delta[[g]])
+      }
 
       # group weights (if any)
       group_dx <- group_w[g] * group_dx
@@ -620,7 +806,7 @@ lav_model_gradient <- function(lavmodel = NULL,
     if (type != "free") {
       lav_msg_fixme("type != free in lav_model_gradient for estimator PML")
     } else {
-      delta <- lav_model_delta(lavmodel = lavmodel, glist = glist)
+      delta <- lav_model_gradient_delta_reference(lavmodel = lavmodel, glist = glist)
     }
 
     for (g in 1:lavmodel@nblocks) {
@@ -668,8 +854,16 @@ lav_model_gradient <- function(lavmodel = NULL,
         } # not conditional.x
 
         # chain rule (fmin)
-        group_dx <-
-          as.numeric(t(d1) %*% delta[[g]])
+        rust_group_dx <- lav_rust_try_model_gradient(
+          lav_native_lav_model_gradient_t_d1_delta(d1, delta[[g]]),
+          silent = TRUE
+        )
+        if (!is.null(rust_group_dx) && !inherits(rust_group_dx, "try-error")) {
+          group_dx <- rust_group_dx
+        } else {
+          group_dx <-
+            as.numeric(t(d1) %*% delta[[g]])
+        }
     # PML
     } else if (estimator == "FML") {
         d1 <- lav_pml_fml_dploglik_dimplied(
@@ -682,8 +876,18 @@ lav_model_gradient <- function(lavmodel = NULL,
         )
 
         # chain rule (fmin)
-        group_dx <-
-          as.numeric(t(d1) %*% delta[[g]]) / lavsamplestats@nobs[[g]]
+        rust_group_dx <- lav_rust_try_model_gradient(
+          lav_native_lav_model_gradient_t_d1_delta(
+            d1, delta[[g]], scale = 1 / lavsamplestats@nobs[[g]]
+          ),
+          silent = TRUE
+        )
+        if (!is.null(rust_group_dx) && !inherits(rust_group_dx, "try-error")) {
+          group_dx <- rust_group_dx
+        } else {
+          group_dx <-
+            as.numeric(t(d1) %*% delta[[g]]) / lavsamplestats@nobs[[g]]
+        }
       } else if (estimator == "MML") {
         group_dx <-
           lav_model_gradient_mml(
@@ -722,11 +926,24 @@ lav_model_gradient <- function(lavmodel = NULL,
     # dx.GW <- - (obs.prop - est.prop)
 
     # poisson version
-    est_freq <- exp(unlist(lav_model_gw(lavmodel = lavmodel, glist = glist)))
-    obs_freq <- unlist(lavsamplestats@group.w) * lavsamplestats@ntotal
-    dx_gw <- -(obs_freq - est_freq)
-    # divide by N (to be consistent with the rest of lavaan)
-    dx_gw <- dx_gw / lavsamplestats@ntotal
+    log_gw <- unlist(lav_model_gw(lavmodel = lavmodel, glist = glist))
+    rust_dx_gw <- lav_rust_try_model_gradient(
+      lav_native_lav_model_gradient_group_weight(
+        log_group_weight = log_gw,
+        observed_group_weight = unlist(lavsamplestats@group.w),
+        total_nobs = lavsamplestats@ntotal
+      ),
+      silent = TRUE
+    )
+    if (!is.null(rust_dx_gw) && !inherits(rust_dx_gw, "try-error")) {
+      dx_gw <- rust_dx_gw
+    } else {
+      est_freq <- exp(log_gw)
+      obs_freq <- unlist(lavsamplestats@group.w) * lavsamplestats@ntotal
+      dx_gw <- -(obs_freq - est_freq)
+      # divide by N (to be consistent with the rest of lavaan)
+      dx_gw <- dx_gw / lavsamplestats@ntotal
+    }
 
     # remove last element (fixed LAST group to zero)
     # dx.GW <- dx.GW[-length(dx.GW)]
@@ -1077,27 +1294,45 @@ lav_model_omega <- function(sigma_hat = NULL, mu_hat = NULL,
       }
 
       if (!lavsamplestats@missing.flag) { # complete data
-        if (meanstructure) {
+        sample_cov <- if (conditional_x) {
+          lavsamplestats@res.cov[[g]]
+        } else {
+          lavsamplestats@cov[[g]]
+        }
+        diff <- if (meanstructure) {
           if (conditional_x) {
-            diff <- lavsamplestats@res.int[[g]] - mu_hat[[g]]
-            w_tilde <- lavsamplestats@res.cov[[g]] + tcrossprod(diff)
+            lavsamplestats@res.int[[g]] - mu_hat[[g]]
           } else {
-            diff <- lavsamplestats@mean[[g]] - mu_hat[[g]]
-            w_tilde <- lavsamplestats@cov[[g]] + tcrossprod(diff)
+            lavsamplestats@mean[[g]] - mu_hat[[g]]
           }
+        } else {
+          numeric(0L)
+        }
+        rust_omega <- lav_rust_try_model_gradient(
+          lav_native_lav_model_gradient_omega_ml(
+            sigma = sigma_hat[[g]],
+            sigma_inv = sigma_hat_inv,
+            sample_cov = sample_cov,
+            mean_diff = diff,
+            meanstructure = meanstructure
+          ),
+          silent = TRUE
+        )
+        if (!is.null(rust_omega) && !inherits(rust_omega, "try-error")) {
+          omega[[g]] <- rust_omega$omega
+          if (meanstructure) {
+            omega_mu[[g]] <- rust_omega$omega_mu
+          }
+        } else if (meanstructure) {
+          w_tilde <- sample_cov + tcrossprod(diff)
           # Browne 1995 eq 4.55
           omega_mu[[g]] <- crossprod(sigma_hat_inv, diff)
           omega[[g]] <-
             (sigma_hat_inv %*% (w_tilde - sigma_hat[[g]]) %*%
               sigma_hat_inv)
         } else {
-          if (conditional_x) {
-            w_tilde <- lavsamplestats@res.cov[[g]]
-          } else {
-            w_tilde <- lavsamplestats@cov[[g]]
-          }
           omega[[g]] <-
-            (sigma_hat_inv %*% (w_tilde - sigma_hat[[g]]) %*%
+            (sigma_hat_inv %*% (sample_cov - sigma_hat[[g]]) %*%
               sigma_hat_inv)
         }
       } else { # missing data
@@ -1145,13 +1380,30 @@ lav_model_omega <- function(sigma_hat = NULL, mu_hat = NULL,
             sx <- matrix(as.numeric(sx), length(diff), length(diff))
           }
 
-          omega_mu_1[var_idx, 1] <-
-            (omega_mu_1[var_idx, 1] + weight * score_mu)
+          var_pos <- if (is.logical(var_idx)) which(var_idx) else as.integer(var_idx)
+          rust_omega_pattern <- lav_rust_try_model_gradient(
+            lav_native_lav_model_gradient_omega_missing_pattern(
+              sigma_inv = sigma_inv,
+              sample_cov = sx,
+              mean_diff = diff,
+              var_idx = var_pos,
+              nvar = nvar,
+              weight = weight
+            ),
+            silent = TRUE
+          )
+          if (!is.null(rust_omega_pattern) && !inherits(rust_omega_pattern, "try-error")) {
+            omega_mu_1[, 1] <- omega_mu_1[, 1] + rust_omega_pattern$omega_mu
+            omega_1 <- omega_1 + rust_omega_pattern$omega
+          } else {
+            omega_mu_1[var_idx, 1] <-
+              (omega_mu_1[var_idx, 1] + weight * score_mu)
 
-          omega_1[var_idx, var_idx] <-
-            (omega_1[var_idx, var_idx] + weight *
-              (sigma_inv %*% sx %*% sigma_inv +
-                tcrossprod(score_mu) - sigma_inv))
+            omega_1[var_idx, var_idx] <-
+              (omega_1[var_idx, var_idx] + weight *
+                (sigma_inv %*% sx %*% sigma_inv +
+                  tcrossprod(score_mu) - sigma_inv))
+          }
         }
         omega_mu[[g]] <- omega_mu_1
         omega[[g]] <- omega_1
@@ -1161,11 +1413,33 @@ lav_model_omega <- function(sigma_hat = NULL, mu_hat = NULL,
     } else if (estimator == "GLS") {
       w_inv <- lavsamplestats@icov[[g]]
       m_w <- lavsamplestats@cov[[g]]
-      omega[[g]] <- (lavsamplestats@nobs[[g]] - 1) / lavsamplestats@nobs[[g]] *
-        (w_inv %*% (m_w - sigma_hat[[g]]) %*% w_inv)
-      if (meanstructure) {
-        diff <- as.matrix(lavsamplestats@mean[[g]] - mu_hat[[g]])
-        omega_mu[[g]] <- crossprod(w_inv, diff)
+      diff <- if (meanstructure) {
+        lavsamplestats@mean[[g]] - mu_hat[[g]]
+      } else {
+        numeric(0L)
+      }
+      rust_omega <- lav_rust_try_model_gradient(
+        lav_native_lav_model_gradient_omega_gls(
+          sigma = sigma_hat[[g]],
+          weight_inv = w_inv,
+          sample_cov = m_w,
+          mean_diff = diff,
+          meanstructure = meanstructure,
+          nobs = lavsamplestats@nobs[[g]]
+        ),
+        silent = TRUE
+      )
+      if (!is.null(rust_omega) && !inherits(rust_omega, "try-error")) {
+        omega[[g]] <- rust_omega$omega
+        if (meanstructure) {
+          omega_mu[[g]] <- rust_omega$omega_mu
+        }
+      } else {
+        omega[[g]] <- (lavsamplestats@nobs[[g]] - 1) / lavsamplestats@nobs[[g]] *
+          (w_inv %*% (m_w - sigma_hat[[g]]) %*% w_inv)
+        if (meanstructure) {
+          omega_mu[[g]] <- crossprod(w_inv, as.matrix(diff))
+        }
       }
     }
 
@@ -1307,3 +1581,4 @@ lav_model_gradient_dd <- function(lavmodel, g_list = NULL, group = 1L) {
 
   dd
 }
+

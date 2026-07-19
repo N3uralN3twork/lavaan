@@ -1,8 +1,65 @@
-RUST_CRATE_DIR = ../rust/lavaan-kernels
-RUST_TARGET_DIR = ../../target
-RUST_DLL = $(RUST_TARGET_DIR)/release/lavaan_kernels.dll
+TARGET = $(subst 64,x86_64,$(subst 32,i686,$(WIN)))-pc-windows-gnu
 
-$(SHLIB): $(RUST_DLL)
+# OneDrive can deny writes to Cargo's generated build-script output. The
+# benchmark/build harness may provide a local cache through this variable.
+TARGET_DIR = ./rust/target
+ifneq ($(strip $(LAVAAN_RUST_TARGET_DIR)),)
+TARGET_DIR = $(LAVAAN_RUST_TARGET_DIR)
+endif
+RUST_LINKER = gcc
+ifneq ($(strip $(LAVAAN_RUST_LINKER)),)
+RUST_LINKER = $(LAVAAN_RUST_LINKER)
+endif
+LIBDIR = $(TARGET_DIR)/$(TARGET)/debug
+STATLIB = $(LIBDIR)/liblavaan.a
+PKG_LIBS = -L$(LIBDIR) -llavaan -lws2_32 -ladvapi32 -luserenv -lbcrypt -lntdll
 
-$(RUST_DLL):
-	cd $(RUST_CRATE_DIR) && CARGO_TARGET_DIR=$(RUST_TARGET_DIR) cargo build --release --lib
+all: $(SHLIB) rust_clean
+
+.PHONY: $(STATLIB)
+
+$(SHLIB): $(STATLIB)
+
+CARGOTMP = $(CURDIR)/.cargo
+VENDOR_DIR = vendor
+
+$(STATLIB):
+	mkdir -p $(TARGET_DIR)/libgcc_mock
+	touch $(TARGET_DIR)/libgcc_mock/libgcc_eh.a
+
+  # If a vendor directory exists, it is used for offline compilation. Otherwise if
+  # vendor.tar.xz exists, it is unzipped and used for offline compilation.
+	if [ -d ./vendor ]; then \
+		echo "=== Using offline vendor directory ==="; \
+		mkdir -p "$(CARGOTMP)" && \
+		cp rust/vendor-config.toml "$(CARGOTMP)/config.toml"; \
+	elif [ -f ./rust/vendor.tar.xz ]; then \
+		echo "=== Using offline vendor tarball ==="; \
+		tar xf rust/vendor.tar.xz && \
+		mkdir -p "$(CARGOTMP)" && \
+		cp rust/vendor-config.toml "$(CARGOTMP)/config.toml"; \
+	fi
+
+	# Build the project using Cargo with additional flags
+	export CARGO_HOME="$(CARGOTMP)" && \
+	export CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER="$(RUST_LINKER)" && \
+	export CARGO_TARGET_I686_PC_WINDOWS_GNU_LINKER="$(RUST_LINKER)" && \
+	export LIBRARY_PATH="$(LIBRARY_PATH);$(TARGET_DIR)/libgcc_mock" && \
+	RUSTFLAGS="$(RUSTFLAGS) --print=native-static-libs" cargo build  --target=$(TARGET) --lib  --manifest-path=rust/Cargo.toml --target-dir=$(TARGET_DIR)
+
+	# Generate wrappers
+	export CARGO_HOME="$(CARGOTMP)" && \
+	export CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER="$(RUST_LINKER)" && \
+	export CARGO_TARGET_I686_PC_WINDOWS_GNU_LINKER="$(RUST_LINKER)" && \
+	export LIBRARY_PATH="$(LIBRARY_PATH);$(TARGET_DIR)/libgcc_mock" && \
+	export PATH="$(PATH):$(HOME)/.cargo/bin" && \
+	cargo run  --bin document --target $(TARGET) --manifest-path=./rust/Cargo.toml --target-dir $(TARGET_DIR)
+
+	# Always clean up CARGOTMP
+	rm -Rf "$(CARGOTMP)";
+
+rust_clean: $(SHLIB)
+	rm -Rf "$(CARGOTMP)" $(VENDOR_DIR) 
+
+clean:
+	rm -Rf $(SHLIB) $(STATLIB) $(OBJECTS) $(TARGET_DIR) $(VENDOR_DIR)

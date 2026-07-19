@@ -1,39 +1,24 @@
 use lavaan_kernels::{
-    helpers::square_matrix_from_column_major,
-    delta_a_delta,
-    lav_matrix_antidiag_idx,
-    lav_matrix_diag_idx,
-    lav_matrix_diag_prepost,
-    lav_matrix_diagh_idx,
-    lav_matrix_lower2full,
-    lav_matrix_upper2full,
-    lav_matrix_vec,
-    lav_matrix_vech,
-    lav_matrix_vech_col_idx,
-    lav_matrix_vech_idx,
-    lav_matrix_vech_reverse,
-    lav_matrix_vech_row_idx,
-    lav_matrix_vechru,
-    lav_matrix_vechru_idx,
-    lav_matrix_vechru_reverse,
-    lav_matrix_vechr,
-    lav_matrix_vechr_idx,
-    lav_matrix_vechr_reverse,
-    lav_matrix_vechu,
-    lav_matrix_vechu_idx,
-    lav_matrix_vechu_reverse,
+    delta_a_delta, helpers::square_matrix_from_column_major, lav_matrix_antidiag_idx,
+    lav_matrix_diag_idx, lav_matrix_diag_prepost, lav_matrix_diagh_idx, lav_matrix_lower2full,
+    lav_matrix_upper2full, lav_matrix_vec, lav_matrix_vech, lav_matrix_vech_col_idx,
+    lav_matrix_vech_idx, lav_matrix_vech_reverse, lav_matrix_vech_row_idx, lav_matrix_vechr,
+    lav_matrix_vechr_idx, lav_matrix_vechr_reverse, lav_matrix_vechru, lav_matrix_vechru_idx,
+    lav_matrix_vechru_reverse, lav_matrix_vechu, lav_matrix_vechu_idx, lav_matrix_vechu_reverse,
     lav_matrix_vecr,
 };
+use ndarray::Array2;
 use std::env;
 use std::io::{self, Read};
 
-fn parse_next<T: std::str::FromStr>(parts: &mut std::str::SplitWhitespace<'_>, label: &str) -> Result<T, String>
+fn parse_next<T: std::str::FromStr>(
+    parts: &mut std::str::SplitWhitespace<'_>,
+    label: &str,
+) -> Result<T, String>
 where
     T::Err: std::fmt::Display,
 {
-    let token = parts
-        .next()
-        .ok_or_else(|| format!("missing {label}"))?;
+    let token = parts.next().ok_or_else(|| format!("missing {label}"))?;
     token
         .parse::<T>()
         .map_err(|error| format!("invalid {label}: {error}"))
@@ -59,7 +44,7 @@ fn print_vec_usize(values: Vec<usize>) {
     println!();
 }
 
-fn print_mat(mat: &faer::Mat<f64>) {
+fn print_mat(mat: &Array2<f64>) {
     print!("{} {}", mat.nrows(), mat.ncols());
     for col in 0..mat.ncols() {
         for row in 0..mat.nrows() {
@@ -285,21 +270,36 @@ fn main() {
         Some("vechr") | Some("lav_matrix_vechr") => run_triangular_extract(&input, "vechr"),
         Some("vechu") | Some("lav_matrix_vechu") => run_triangular_extract(&input, "vechu"),
         Some("vechru") | Some("lav_matrix_vechru") => run_triangular_extract(&input, "vechru"),
-        Some("diag_idx") | Some("lav_matrix_diag_idx")
-        | Some("diagh_idx") | Some("lav_matrix_diagh_idx")
-        | Some("antidiag_idx") | Some("lav_matrix_antidiag_idx")
-        | Some("vech_idx") | Some("lav_matrix_vech_idx")
-        | Some("vech_row_idx") | Some("lav_matrix_vech_row_idx")
-        | Some("vech_col_idx") | Some("lav_matrix_vech_col_idx")
-        | Some("vechr_idx") | Some("lav_matrix_vechr_idx")
-        | Some("vechu_idx") | Some("lav_matrix_vechu_idx")
-        | Some("vechru_idx") | Some("lav_matrix_vechru_idx") => run_index_command(&input, command.as_deref().unwrap()),
-        Some("vech_reverse") | Some("lav_matrix_vech_reverse")
-        | Some("vechru_reverse") | Some("lav_matrix_vechru_reverse")
-        | Some("upper2full") | Some("lav_matrix_upper2full")
-        | Some("vechr_reverse") | Some("lav_matrix_vechr_reverse")
-        | Some("vechu_reverse") | Some("lav_matrix_vechu_reverse")
-        | Some("lower2full") | Some("lav_matrix_lower2full") => {
+        Some("diag_idx")
+        | Some("lav_matrix_diag_idx")
+        | Some("diagh_idx")
+        | Some("lav_matrix_diagh_idx")
+        | Some("antidiag_idx")
+        | Some("lav_matrix_antidiag_idx")
+        | Some("vech_idx")
+        | Some("lav_matrix_vech_idx")
+        | Some("vech_row_idx")
+        | Some("lav_matrix_vech_row_idx")
+        | Some("vech_col_idx")
+        | Some("lav_matrix_vech_col_idx")
+        | Some("vechr_idx")
+        | Some("lav_matrix_vechr_idx")
+        | Some("vechu_idx")
+        | Some("lav_matrix_vechu_idx")
+        | Some("vechru_idx")
+        | Some("lav_matrix_vechru_idx") => run_index_command(&input, command.as_deref().unwrap()),
+        Some("vech_reverse")
+        | Some("lav_matrix_vech_reverse")
+        | Some("vechru_reverse")
+        | Some("lav_matrix_vechru_reverse")
+        | Some("upper2full")
+        | Some("lav_matrix_upper2full")
+        | Some("vechr_reverse")
+        | Some("lav_matrix_vechr_reverse")
+        | Some("vechu_reverse")
+        | Some("lav_matrix_vechu_reverse")
+        | Some("lower2full")
+        | Some("lav_matrix_lower2full") => {
             run_triangle_reverse(&input, command.as_deref().unwrap())
         }
         Some(_) | None => {

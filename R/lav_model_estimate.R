@@ -24,6 +24,25 @@ lav_model_estimate <- function(lavmodel = NULL,
   verbose <- lav_verbose()
   debug <- lav_debug()
   ngroups <- lavsamplestats@ngroups
+  use_rust_model_estimate <- lav_rust_kernel_enabled("model_estimate")
+  estimate_K <- if (use_rust_model_estimate && lavmodel@eq.constraints) {
+    lavmodel@eq.constraints.K
+  } else {
+    matrix(numeric(0L), nrow = 0L, ncol = 0L)
+  }
+  estimate_k0 <- if (use_rust_model_estimate && lavmodel@eq.constraints) {
+    lavmodel@eq.constraints.k0
+  } else {
+    numeric(0L)
+  }
+  rust_model_estimate_try <- function(expr) {
+    if (!use_rust_model_estimate) {
+      return(NULL)
+    }
+
+    result <- try(expr, silent = TRUE)
+    if (inherits(result, "try-error")) NULL else result
+  }
 
   if (lavsamplestats@missing.flag || estimator == "PML" ||
       lavdata@nlevels > 1L) {
@@ -201,11 +220,30 @@ lav_model_estimate <- function(lavmodel = NULL,
   # parscale should obey the equality constraints
   if (lavmodel@eq.constraints && lavoptions$optim.parscale != "none") {
     # pack
-    p_pack <- as.numeric((parscale - lavmodel@eq.constraints.k0) %*%
-      lavmodel@eq.constraints.K)
+    rust_parscale <- rust_model_estimate_try(
+      lav_native_lav_model_estimate_pack(
+        parscale, lavmodel@eq.constraints.k0, lavmodel@eq.constraints.K
+      )
+    )
+    p_pack <- if (is.null(rust_parscale)) {
+      as.numeric((parscale - lavmodel@eq.constraints.k0) %*%
+        lavmodel@eq.constraints.K)
+    } else {
+      rust_parscale
+    }
     # unpack
-    parscale <- as.numeric(lavmodel@eq.constraints.K %*% p_pack) +
-      lavmodel@eq.constraints.k0
+    rust_parscale <- rust_model_estimate_try(
+      lav_native_lav_model_estimate_unpack_unscale(
+        p_pack, lavmodel@eq.constraints.k0, lavmodel@eq.constraints.K,
+        rep(1.0, length(parscale))
+      )
+    )
+    parscale <- if (is.null(rust_parscale)) {
+      as.numeric(lavmodel@eq.constraints.K %*% p_pack) +
+        lavmodel@eq.constraints.k0
+    } else {
+      rust_parscale
+    }
   }
   if (debug) {
     cat("parscale = ", parscale, "\n")
@@ -214,8 +252,17 @@ lav_model_estimate <- function(lavmodel = NULL,
 
   # 2. pack (apply equality constraints)
   if (lavmodel@eq.constraints && ncol(lavmodel@eq.constraints.K) > 0L) {
-    z_pack <- as.numeric((z_unpack - lavmodel@eq.constraints.k0) %*%
-      lavmodel@eq.constraints.K)
+    rust_z_pack <- rust_model_estimate_try(
+      lav_native_lav_model_estimate_pack(
+        z_unpack, lavmodel@eq.constraints.k0, lavmodel@eq.constraints.K
+      )
+    )
+    z_pack <- if (is.null(rust_z_pack)) {
+      as.numeric((z_unpack - lavmodel@eq.constraints.k0) %*%
+        lavmodel@eq.constraints.K)
+    } else {
+      rust_z_pack
+    }
   } else {
     z_pack <- z_unpack
   }
@@ -305,12 +352,21 @@ lav_model_estimate <- function(lavmodel = NULL,
       return(estimate_cache)
     }
 
-    model_x <- x
-    if (lavmodel@eq.constraints) {
-      model_x <- as.numeric(lavmodel@eq.constraints.K %*% model_x) +
-        lavmodel@eq.constraints.k0
+    rust_model_x <- rust_model_estimate_try(
+      lav_native_lav_model_estimate_unpack_unscale(
+        x, estimate_k0, estimate_K, parscale
+      )
+    )
+    model_x <- if (is.null(rust_model_x)) {
+      model_x <- x
+      if (lavmodel@eq.constraints) {
+        model_x <- as.numeric(lavmodel@eq.constraints.K %*% model_x) +
+          lavmodel@eq.constraints.k0
+      }
+      model_x / parscale
+    } else {
+      rust_model_x
     }
-    model_x <- model_x / parscale
 
     estimate_cache$packed_x <- x
     estimate_cache$model_x <- model_x
@@ -433,12 +489,27 @@ lav_model_estimate <- function(lavmodel = NULL,
       cat("\n")
     }
 
-    # 1. scale (note: divide, not multiply!)
-    dx <- dx / parscale
+    rust_dx <- rust_model_estimate_try(
+      lav_native_lav_model_estimate_gradient_postprocess(
+        dx, parscale, estimate_K, lavsamplestats@ntotal,
+        estimator == "PML"
+      )
+    )
+    if (is.null(rust_dx)) {
+      # 1. scale (note: divide, not multiply!)
+      dx <- dx / parscale
 
-    # 2. pack
-    if (lavmodel@eq.constraints) {
-      dx <- as.numeric(dx %*% lavmodel@eq.constraints.K)
+      # 2. pack
+      if (lavmodel@eq.constraints) {
+        dx <- as.numeric(dx %*% lavmodel@eq.constraints.K)
+      }
+
+      # only for PML: divide by N (to speed up convergence)
+      if (estimator == "PML") {
+        dx <- dx / lavsamplestats@ntotal
+      }
+    } else {
+      dx <- rust_dx
     }
 
     # 3. transform variances back
@@ -451,11 +522,6 @@ lav_model_estimate <- function(lavmodel = NULL,
     #    dx[lavmodel@x.free.var.idx] <-
     #        ( 2 * x.var.sign * dx[lavmodel@x.free.var.idx] * x.sd )
     # }
-
-    # only for PML: divide by N (to speed up convergence)
-    if (estimator == "PML") {
-      dx <- dx / lavsamplestats@ntotal
-    }
 
     if (debug) {
       cat("Gradient function (analytical, after eq.constraints.K) =\n")
@@ -1106,12 +1172,35 @@ lav_model_estimate <- function(lavmodel = NULL,
 
   # 2. unpack
   if (lavmodel@eq.constraints) {
-    x <- as.numeric(lavmodel@eq.constraints.K %*% x) +
-      lavmodel@eq.constraints.k0
+    rust_x <- rust_model_estimate_try(
+      lav_native_lav_model_estimate_unpack_unscale(
+        x, lavmodel@eq.constraints.k0, lavmodel@eq.constraints.K,
+        rep(1.0, length(lavmodel@eq.constraints.k0))
+      )
+    )
+    x <- if (is.null(rust_x)) {
+      as.numeric(lavmodel@eq.constraints.K %*% x) +
+        lavmodel@eq.constraints.k0
+    } else {
+      rust_x
+    }
   }
 
   # 1. unscale
-  x <- x / parscale
+  if (lavmodel@eq.constraints) {
+    x <- x / parscale
+  } else {
+    rust_x <- rust_model_estimate_try(
+      lav_native_lav_model_estimate_unpack_unscale(
+        x, estimate_k0, estimate_K, parscale
+      )
+    )
+    if (is.null(rust_x)) {
+      x <- x / parscale
+    } else {
+      x <- rust_x
+    }
+  }
 
   attr(x, "converged") <- converged
   attr(x, "start") <- start_x

@@ -184,9 +184,10 @@ lav_model_nvcov_robust_sem <- function(lavmodel = NULL,
       # full weight matrix
       wd <- wls_v[[g]] %*% delta[[g]]
     }
-    t_dvgvd <- t_dvgvd + fg * fg / fg1 * crossprod(wd, gamma[[g]] %*% wd)
+    t_dvgvd <- t_dvgvd + fg * fg / fg1 *
+      lav_model_vcov_delta_A_delta(wd, gamma[[g]])
   } # g
-  nvar_cov <- (e_inv %*% t_dvgvd %*% e_inv)
+  nvar_cov <- lav_model_vcov_sandwich(e_inv, t_dvgvd)
 
   # to be reused by lav_test()
   if (attr_delta) {
@@ -277,7 +278,7 @@ lav_model_nvcov_robust_sandwich <- function(lavmodel = NULL,    # nolint
     )
 
   # compute sandwich estimator
-  nvar_cov <- e_inv %*% b0 %*% e_inv
+  nvar_cov <- lav_model_vcov_sandwich(e_inv, b0)
 
   attr(nvar_cov, "B0.group") <- attr(b0, "B0.group")
 
@@ -439,10 +440,11 @@ lav_model_nvcov_two_stage <- function(lavmodel = NULL,
     }
 
     # compute
-    t_dvgvd <- t_dvgvd + fg * fg / fg1 * crossprod(wd, gamma[[g]] %*% wd)
+    t_dvgvd <- t_dvgvd + fg * fg / fg1 *
+      lav_model_vcov_delta_A_delta(wd, gamma[[g]])
   } # g
 
-  nvar_cov <- (e_inv %*% t_dvgvd %*% e_inv)
+  nvar_cov <- lav_model_vcov_sandwich(e_inv, t_dvgvd)
 
   # to be reused by lavaanTest
   attr(nvar_cov, "Delta") <- delta
@@ -752,7 +754,7 @@ lav_model_vcov_se <- function(lavmodel, lavpartable, VCOV = NULL, # nolint start
       if (lavmodel@ceq.simple.only) {
         jac <- jac %*% t(lavmodel@ceq.simple.K)
       }
-      def_cov <- jac %*% VCOV %*% t(jac)
+      def_cov <- lav_model_vcov_jacobian_vcov_jacobian_t(jac, VCOV)
     }
     # check for negative se's
     diag_def_cov <- diag(def_cov)
