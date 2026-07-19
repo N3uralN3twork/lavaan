@@ -3,6 +3,25 @@ lav_model_objective_ml <- function(sigma_hat = NULL, mu_hat = NULL,
                          data_cov = NULL, data_mean = NULL,
                          data_cov_log_det = NULL,
                          meanstructure = FALSE) {
+  if (
+    lav_rust_kernel_enabled("model_objective") &&
+      is.matrix(sigma_hat) && is.matrix(data_cov) &&
+      is.numeric(sigma_hat) && is.numeric(data_cov) &&
+      isTRUE(attr(sigma_hat, "po"))
+  ) {
+    rust_result <- try(lav_native_lav_model_objective_ml(
+      sigma_hat = sigma_hat,
+      mu_hat = mu_hat,
+      data_cov = data_cov,
+      data_mean = data_mean,
+      data_cov_log_det = data_cov_log_det,
+      meanstructure = meanstructure
+    ), silent = TRUE)
+    if (!inherits(rust_result, "try-error")) {
+      return(rust_result)
+    }
+  }
+
   # FIXME: WHAT IS THE BEST THING TO DO HERE??
   # CURRENTLY: return Inf  (at least for nlminb, this works well)
   if (!attr(sigma_hat, "po")) {
@@ -35,6 +54,30 @@ lav_model_objective_ml_res <- function(sigma_hat = NULL, mu_hat = NULL,
                                        res_int = NULL, res_slopes = NULL,
                                        res_cov_log_det = NULL,
                                        cov_x = NULL, mean_x = NULL) {
+  if (
+    lav_rust_kernel_enabled("model_objective") &&
+      is.matrix(sigma_hat) && is.matrix(res_cov) && is.matrix(res_slopes) &&
+      is.matrix(pi0) && is.matrix(cov_x) &&
+      is.numeric(sigma_hat) && is.numeric(res_cov) &&
+      is.numeric(res_slopes) && is.numeric(pi0) && is.numeric(cov_x) &&
+      isTRUE(attr(sigma_hat, "po"))
+  ) {
+    rust_result <- try(lav_native_lav_model_objective_ml_res(
+      sigma_hat = sigma_hat,
+      mu_hat = mu_hat,
+      pi0 = pi0,
+      res_cov = res_cov,
+      res_int = res_int,
+      res_slopes = res_slopes,
+      res_cov_log_det = res_cov_log_det,
+      cov_x = cov_x,
+      mean_x = mean_x
+    ), silent = TRUE)
+    if (!inherits(rust_result, "try-error")) {
+      return(rust_result)
+    }
+  }
+
   if (!attr(sigma_hat, "po")) {
     return(Inf)
   }
@@ -118,6 +161,25 @@ lav_model_objective_gls <- function(sigma_hat = NULL,
                                     data_mean = NULL,
                                     meanstructure = FALSE,
                                     correlation = FALSE) {
+  if (
+    lav_rust_kernel_enabled("model_objective") &&
+      is.matrix(sigma_hat) && is.matrix(data_cov) && is.matrix(data_cov_inv) &&
+      is.numeric(sigma_hat) && is.numeric(data_cov) && is.numeric(data_cov_inv)
+  ) {
+    rust_result <- try(lav_native_lav_model_objective_gls(
+      sigma_hat = sigma_hat,
+      data_cov = data_cov,
+      data_cov_inv = data_cov_inv,
+      data_mean = data_mean,
+      mu_hat = mu_hat,
+      meanstructure = meanstructure,
+      correlation = correlation
+    ), silent = TRUE)
+    if (!inherits(rust_result, "try-error")) {
+      return(rust_result)
+    }
+  }
+
   tmp <- data_cov_inv %*% (data_cov - sigma_hat)
   # tmp is not perfectly symmetric, so we use t(tmp) on the next line
   # to obtain the same value as lav_model_objective_wls
@@ -145,6 +207,19 @@ lav_model_objective_gls <- function(sigma_hat = NULL,
 # full weight (WLS.V) matrix
 lav_model_objective_wls <- function(wls_est = NULL,
                                  wls_obs = NULL, wls_v = NULL) {
+  if (
+    lav_rust_kernel_enabled("model_objective") &&
+      is.matrix(wls_v) && is.numeric(wls_est) &&
+      is.numeric(wls_obs) && is.numeric(wls_v)
+  ) {
+    rust_result <- try(lav_native_lav_model_objective_wls(
+      wls_est = wls_est, wls_obs = wls_obs, wls_v = wls_v
+    ), silent = TRUE)
+    if (!inherits(rust_result, "try-error")) {
+      return(rust_result)
+    }
+  }
+
   # diff <- as.matrix(WLS.obs - WLS.est)
   # fx <- as.numeric( t(diff) %*% WLS.V %*% diff )
 
@@ -162,6 +237,18 @@ lav_model_objective_wls <- function(wls_est = NULL,
 # diagonally weighted LS (DWLS)
 lav_model_objective_dwls <- function(wls_est = NULL,
                             wls_obs = NULL, wls_vd = NULL) {
+  if (
+    lav_rust_kernel_enabled("model_objective") &&
+      is.numeric(wls_est) && is.numeric(wls_obs) && is.numeric(wls_vd)
+  ) {
+    rust_result <- try(lav_native_lav_model_objective_dwls(
+      wls_est = wls_est, wls_obs = wls_obs, wls_vd = wls_vd
+    ), silent = TRUE)
+    if (!inherits(rust_result, "try-error")) {
+      return(rust_result)
+    }
+  }
+
   diff <- wls_obs - wls_est
   fx <- sum(diff * diff * wls_vd)
 

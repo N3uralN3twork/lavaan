@@ -3,6 +3,7 @@
 pub mod helpers;
 pub mod lav_model_estimate;
 pub mod lav_model_gradient;
+pub mod lav_model_objective;
 pub mod lav_model_vcov;
 
 use ndarray::{Array2, ArrayView2, ShapeBuilder};
@@ -18,6 +19,10 @@ pub use lav_model_gradient::{
     lav_model_gradient_ml_group, lav_model_gradient_ntrls_post, lav_model_gradient_omega_gls,
     lav_model_gradient_omega_missing_pattern, lav_model_gradient_omega_ml,
     lav_model_gradient_t_d1_delta, lav_model_gradient_wls, ConditionalXSampleCache, MlOmega,
+};
+pub use lav_model_objective::{
+    lav_model_objective_dwls, lav_model_objective_gls, lav_model_objective_ml,
+    lav_model_objective_ml_res, lav_model_objective_wls,
 };
 pub use lav_model_vcov::{
     lav_model_vcov_delta_a_delta, lav_model_vcov_jacobian_vcov_jacobian_t, lav_model_vcov_sandwich,

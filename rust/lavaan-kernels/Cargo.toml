@@ -36,6 +36,11 @@ name = "lav_model_estimate"
 path = "benches/lav_model_estimate.rs"
 harness = false
 
+[[bench]]
+name = "lav_model_objective"
+path = "benches/lav_model_objective.rs"
+harness = false
+
 [[test]]
 name = "lav_model_gradient"
 path = "../tests/lav_model_gradient.rs"
@@ -47,3 +52,7 @@ path = "../tests/lav_model_vcov.rs"
 [[test]]
 name = "lav_model_estimate"
 path = "../tests/lav_model_estimate.rs"
+
+[[test]]
+name = "lav_model_objective"
+path = "../tests/lav_model_objective.rs"

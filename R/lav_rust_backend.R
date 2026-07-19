@@ -68,7 +68,10 @@ lav_rust_backend_available <- function() {
 }
 
 lav_rust_kernel_enabled <- function(kernel) {
-  kernel <- match.arg(kernel, c("matrix", "model_gradient", "model_vcov", "model_estimate"))
+  kernel <- match.arg(kernel, c(
+    "matrix", "model_gradient", "model_vcov", "model_estimate",
+    "model_objective"
+  ))
   env_kernels <- Sys.getenv("LAVAAN_RUST_KERNELS", unset = "")
   opt_kernels <- getOption("lavaan.rust.kernels", default = NULL)
 
@@ -118,6 +121,47 @@ lav_native_lav_matrix_diag_prepost <- function(A, d) {
 
 lav_native_lav_matrix_delta_A_delta <- function(delta, a1) {
   lav_rust_matrix_delta_a_delta(delta, a1)
+}
+
+lav_native_lav_model_objective_ml <- function(
+    sigma_hat, mu_hat, data_cov, data_mean, data_cov_log_det,
+    meanstructure = FALSE) {
+  lav_rust_model_objective_ml(
+    sigma_hat, as.matrix(attr(sigma_hat, "inv")), data_cov,
+    as.numeric(mu_hat), as.numeric(data_mean),
+    as.numeric(attr(sigma_hat, "log.det")), as.numeric(data_cov_log_det),
+    as.logical(meanstructure)
+  )
+}
+
+lav_native_lav_model_objective_ml_res <- function(
+    sigma_hat, mu_hat, pi0, res_cov, res_int, res_slopes,
+    res_cov_log_det, cov_x, mean_x) {
+  lav_rust_model_objective_ml_res(
+    sigma_hat, as.matrix(attr(sigma_hat, "inv")), res_cov,
+    as.numeric(res_int), res_slopes, as.numeric(mu_hat), pi0, cov_x,
+    as.numeric(mean_x), as.numeric(attr(sigma_hat, "log.det")),
+    as.numeric(res_cov_log_det)
+  )
+}
+
+lav_native_lav_model_objective_gls <- function(
+    sigma_hat, data_cov, data_cov_inv, data_mean, mu_hat,
+    meanstructure = FALSE, correlation = FALSE) {
+  lav_rust_model_objective_gls(
+    sigma_hat, data_cov, data_cov_inv, as.numeric(mu_hat),
+    as.numeric(data_mean), as.logical(meanstructure), as.logical(correlation)
+  )
+}
+
+lav_native_lav_model_objective_wls <- function(wls_est, wls_obs, wls_v) {
+  lav_rust_model_objective_wls(as.numeric(wls_est), as.numeric(wls_obs), wls_v)
+}
+
+lav_native_lav_model_objective_dwls <- function(wls_est, wls_obs, wls_vd) {
+  lav_rust_model_objective_dwls(
+    as.numeric(wls_est), as.numeric(wls_obs), as.numeric(wls_vd)
+  )
 }
 
 lav_native_lav_model_vcov_delta_A_delta <- function(delta, a1) {

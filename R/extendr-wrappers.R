@@ -15,6 +15,16 @@ lav_rust_matrix_diag_prepost <- function(input, d) .Call(wrap__lav_rust_matrix_d
 
 lav_rust_matrix_delta_a_delta <- function(delta, a1) .Call(wrap__lav_rust_matrix_delta_a_delta, delta, a1)
 
+lav_rust_model_objective_ml <- function(sigma_hat, sigma_hat_inv, data_cov, mu_hat, data_mean, sigma_hat_log_det, data_cov_log_det, meanstructure) .Call(wrap__lav_rust_model_objective_ml, sigma_hat, sigma_hat_inv, data_cov, mu_hat, data_mean, sigma_hat_log_det, data_cov_log_det, meanstructure)
+
+lav_rust_model_objective_ml_res <- function(sigma_hat, sigma_hat_inv, res_cov, res_int, res_slopes, mu_hat, pi0, cov_x, mean_x, sigma_hat_log_det, res_cov_log_det) .Call(wrap__lav_rust_model_objective_ml_res, sigma_hat, sigma_hat_inv, res_cov, res_int, res_slopes, mu_hat, pi0, cov_x, mean_x, sigma_hat_log_det, res_cov_log_det)
+
+lav_rust_model_objective_gls <- function(sigma_hat, data_cov, data_cov_inv, mu_hat, data_mean, meanstructure, correlation) .Call(wrap__lav_rust_model_objective_gls, sigma_hat, data_cov, data_cov_inv, mu_hat, data_mean, meanstructure, correlation)
+
+lav_rust_model_objective_wls <- function(wls_est, wls_obs, wls_v) .Call(wrap__lav_rust_model_objective_wls, wls_est, wls_obs, wls_v)
+
+lav_rust_model_objective_dwls <- function(wls_est, wls_obs, wls_vd) .Call(wrap__lav_rust_model_objective_dwls, wls_est, wls_obs, wls_vd)
+
 lav_rust_model_vcov_delta_a_delta <- function(delta, a1) .Call(wrap__lav_rust_model_vcov_delta_a_delta, delta, a1)
 
 lav_rust_model_vcov_sandwich <- function(left, middle) .Call(wrap__lav_rust_model_vcov_sandwich, left, middle)
