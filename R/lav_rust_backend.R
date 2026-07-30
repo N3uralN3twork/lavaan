@@ -134,6 +134,68 @@ lav_native_lav_model_objective_ml <- function(
   )
 }
 
+lav_native_lav_model_objective_gradient_ml <- function(
+    sigma, sigma_inv, data_cov, mu_hat, data_mean, sigma_log_det,
+    data_cov_log_det, delta, nvar, delta_rows, delta_cols, group_weights,
+    meanstructure = FALSE) {
+  lav_rust_model_objective_gradient_ml(
+    as.numeric(sigma), as.numeric(sigma_inv), as.numeric(data_cov),
+    as.numeric(mu_hat), as.numeric(data_mean), as.numeric(sigma_log_det),
+    as.numeric(data_cov_log_det), as.numeric(delta), as.integer(nvar),
+    as.integer(delta_rows), as.integer(delta_cols), as.numeric(group_weights),
+    as.logical(meanstructure)
+  )
+}
+
+lav_native_lav_model_objective_gradient_lisrel_ml <- function(
+    lambda, theta, psi, beta, nu, alpha, sample_cov, sample_mean,
+    nvar, nfac, beta_present, nobs, ntotal, free_group, free_kind,
+    free_element, free_parameter, nfree, meanstructure = FALSE) {
+  lav_rust_model_objective_gradient_lisrel_ml(
+    as.numeric(lambda), as.numeric(theta), as.numeric(psi), as.numeric(beta),
+    as.numeric(nu), as.numeric(alpha), as.numeric(sample_cov),
+    as.numeric(sample_mean), as.integer(nvar), as.integer(nfac),
+    as.integer(beta_present), as.numeric(nobs), as.numeric(ntotal),
+    as.integer(free_group), as.integer(free_kind), as.integer(free_element),
+    as.integer(free_parameter), as.integer(nfree), as.logical(meanstructure)
+  )
+}
+
+lav_native_lisrel_ml_plan_new <- function(
+    sample_cov, sample_mean, nvar, nfac, beta_present, nobs, ntotal,
+    free_group, free_kind, free_element, free_parameter, nfree,
+    meanstructure = FALSE) {
+  lav_rust_lisrel_ml_plan_new(
+    as.numeric(sample_cov), as.numeric(sample_mean), as.integer(nvar),
+    as.integer(nfac), as.integer(beta_present), as.numeric(nobs),
+    as.numeric(ntotal), as.integer(free_group), as.integer(free_kind),
+    as.integer(free_element), as.integer(free_parameter), as.integer(nfree),
+    as.logical(meanstructure)
+  )
+}
+
+lav_native_lav_model_objective_gradient_lisrel_ml_with_plan <- function(
+    plan, lambda, theta, psi, beta, nu, alpha) {
+  lav_rust_model_objective_gradient_lisrel_ml_with_plan(
+    plan, as.numeric(lambda), as.numeric(theta), as.numeric(psi),
+    as.numeric(beta), as.numeric(nu), as.numeric(alpha)
+  )
+}
+
+lav_native_lav_model_objective_gradient_lisrel_ml_diagnostics <- function(
+    lambda, theta, psi, beta, nu, alpha, sample_cov, sample_mean,
+    nvar, nfac, beta_present, nobs, ntotal, free_group, free_kind,
+    free_element, free_parameter, nfree, meanstructure = FALSE) {
+  lav_rust_model_objective_gradient_lisrel_ml_diagnostics(
+    as.numeric(lambda), as.numeric(theta), as.numeric(psi), as.numeric(beta),
+    as.numeric(nu), as.numeric(alpha), as.numeric(sample_cov),
+    as.numeric(sample_mean), as.integer(nvar), as.integer(nfac),
+    as.integer(beta_present), as.numeric(nobs), as.numeric(ntotal),
+    as.integer(free_group), as.integer(free_kind), as.integer(free_element),
+    as.integer(free_parameter), as.integer(nfree), as.logical(meanstructure)
+  )
+}
+
 lav_native_lav_model_objective_ml_res <- function(
     sigma_hat, mu_hat, pi0, res_cov, res_int, res_slopes,
     res_cov_log_det, cov_x, mean_x) {
@@ -760,5 +822,3 @@ lav_matrix_diag_prepost <- function(A, d) {
   A <- A * d
   t(t(A) * d)
 }
-
-

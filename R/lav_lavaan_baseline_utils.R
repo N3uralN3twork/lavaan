@@ -633,6 +633,13 @@ lav_lavaan_baseline_fiml_moments <- function(missing = NULL,
     return(NULL)
   }
 
+  if (isTRUE(getOption("lavaan.rust.experimental.baseline_fiml", FALSE))) {
+    if (!lav_native_backend_available()) {
+      lav_msg_stop("Rust backend is required for experimental baseline FIML moments")
+    }
+    return(lav_native_lav_lavaan_baseline_fiml_moments(missing, nvar))
+  }
+
   count <- sum_y <- numeric(nvar)
   for (p in seq_along(missing)) {
     pat <- missing[[p]]
@@ -680,6 +687,13 @@ lav_lavaan_baseline_fiml_moments <- function(missing = NULL,
 lav_lavaan_baseline_fiml_loglik <- function(missing = NULL,
                                             mean = NULL,
                                             var = NULL) {
+  if (isTRUE(getOption("lavaan.rust.experimental.baseline_fiml", FALSE))) {
+    if (!lav_native_backend_available()) {
+      lav_msg_stop("Rust backend is required for experimental baseline FIML log likelihood")
+    }
+    return(lav_native_lav_lavaan_baseline_fiml_loglik(missing, mean, var))
+  }
+
   log_2pi <- log(2 * pi)
   log_var <- log(var)
   loglik <- 0.0

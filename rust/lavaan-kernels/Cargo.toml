@@ -1,0 +1,22 @@
+[package]
+name = "lavaan-kernels"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.65"
+
+[features]
+# Deliberately opt-in: this is a build/link feasibility probe for the
+# installed-package toolchain, not the numerical-core implementation.
+linalg-openblas-spike = ["dep:ndarray-linalg", "dep:openblas-src"]
+
+[dependencies]
+ndarray = "0.16"
+ndarray-linalg = { version = "0.17", default-features = false, features = ["openblas-static"], optional = true }
+# ndarray-linalg's current Windows probe reaches openblas-build with default
+# features disabled.  Pull the identical source crate explicitly so its
+# rustls downloader feature is unified for the feasibility build.
+openblas-src = { version = "=0.10.16", default-features = false, features = ["cblas", "lapacke", "static", "rustls"], optional = true }
+
+[[test]]
+name = "numerical_core"
+path = "../tests/numerical_core.rs"

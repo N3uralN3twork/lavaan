@@ -10,3 +10,6 @@ settings.json
 tmp/
 tools/
 src/
+src/rust/vendor
+src/Makevars
+src/Makevars.win

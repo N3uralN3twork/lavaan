@@ -345,6 +345,8 @@ lav_model_estimate <- function(lavmodel = NULL,
   estimate_cache$glist <- NULL
   estimate_cache$implied <- NULL
   estimate_cache$implied_spec <- NULL
+  estimate_cache$objective_gradient <- NULL
+  estimate_cache$lisrel_objective_gradient_plan <- NULL
 
   estimate_state <- function(x) {
     if (!is.null(estimate_cache$packed_x) &&
@@ -373,6 +375,7 @@ lav_model_estimate <- function(lavmodel = NULL,
     estimate_cache$glist <- lav_model_x2glist(lavmodel, x = model_x)
     estimate_cache$implied <- NULL
     estimate_cache$implied_spec <- NULL
+    estimate_cache$objective_gradient <- NULL
     estimate_cache
   }
 
@@ -387,6 +390,49 @@ lav_model_estimate <- function(lavmodel = NULL,
     !lavmodel@conditional.x &&
     !lavmodel@group.w.free &&
     length(lavsamplestats@cov) > 0L
+  use_rust_ml_objective_gradient_full <- isTRUE(getOption(
+    "lavaan.rust.experimental.objective_gradient_full", FALSE
+  )) && share_implied &&
+    !lavsamplestats@missing.flag &&
+    !lavmodel@conditional.x &&
+    !lavmodel@group.w.free &&
+    length(lavsamplestats@cov) > 0L
+  use_rust_ml_objective_gradient <- isTRUE(getOption(
+    "lavaan.rust.experimental.objective_gradient", FALSE
+  )) && share_implied &&
+    !lavsamplestats@missing.flag &&
+    !lavmodel@conditional.x &&
+    !lavmodel@group.w.free &&
+    length(lavsamplestats@cov) > 0L
+  if (use_rust_ml_objective_gradient_full) {
+    estimate_cache$lisrel_objective_gradient_plan <-
+      lav_model_objective_gradient_lisrel_plan(
+        lavmodel = lavmodel, lavsamplestats = lavsamplestats, lavdata = lavdata
+      )
+  }
+
+  objective_gradient_state <- function(state) {
+    if (!use_rust_ml_objective_gradient_full && !use_rust_ml_objective_gradient) return(NULL)
+    if (is.null(state$objective_gradient)) {
+      state$objective_gradient <- if (use_rust_ml_objective_gradient_full) {
+        lav_model_objective_gradient_lisrel_ml(
+          lavmodel = lavmodel, glist = state$glist,
+          lavsamplestats = lavsamplestats, lavdata = lavdata,
+          plan = state$lisrel_objective_gradient_plan
+        )
+      } else {
+        lav_model_objective_gradient_ml(
+          lavmodel = lavmodel,
+          glist = state$glist,
+          lavsamplestats = lavsamplestats,
+          lavdata = lavdata,
+          implied = state,
+          ceq_simple = lavmodel@ceq.simple.only
+        )
+      }
+    }
+    state$objective_gradient
+  }
 
   # function to be minimized
   objective_function <- function(x, verbose = FALSE, inf_to_max = FALSE,
@@ -402,8 +448,12 @@ lav_model_estimate <- function(lavmodel = NULL,
     # }
 
     state <- estimate_state(x)
+    objective_gradient <- objective_gradient_state(state)
 
-    if (use_fast_ml_objective) {
+    if (!is.null(objective_gradient)) {
+      fx <- objective_gradient$objective
+      attr(fx, "fx.group") <- objective_gradient$fx.group
+    } else if (use_fast_ml_objective) {
       fx <- lav_model_objective_ml_single_group_fast(
         lavmodel = lavmodel,
         glist = state$glist,
@@ -470,18 +520,23 @@ lav_model_estimate <- function(lavmodel = NULL,
     # }
 
     state <- estimate_state(x)
+    objective_gradient <- objective_gradient_state(state)
 
-    dx <- lav_model_gradient(
-      lavmodel = lavmodel,
-      glist = state$glist,
-      lavsamplestats = lavsamplestats,
-      lavdata = lavdata,
-      lavcache = lavcache,
-      type = "free",
-      group_weight = group_weight, ### check me!!
-      ceq_simple = lavmodel@ceq.simple.only,
-      implied = if (share_implied) state else NULL
-    )
+    dx <- if (!is.null(objective_gradient)) {
+      objective_gradient$gradient
+    } else {
+      lav_model_gradient(
+        lavmodel = lavmodel,
+        glist = state$glist,
+        lavsamplestats = lavsamplestats,
+        lavdata = lavdata,
+        lavcache = lavcache,
+        type = "free",
+        group_weight = group_weight, ### check me!!
+        ceq_simple = lavmodel@ceq.simple.only,
+        implied = if (share_implied) state else NULL
+      )
+    }
 
     if (debug) {
       cat("Gradient function (analytical) =\n")

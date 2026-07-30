@@ -1,31 +1,26 @@
 # fitting function for standard ML
 lav_model_objective_ml <- function(sigma_hat = NULL, mu_hat = NULL,
-                         data_cov = NULL, data_mean = NULL,
-                         data_cov_log_det = NULL,
-                         meanstructure = FALSE) {
-  if (
-    lav_rust_kernel_enabled("model_objective") &&
-      is.matrix(sigma_hat) && is.matrix(data_cov) &&
-      is.numeric(sigma_hat) && is.numeric(data_cov) &&
-      isTRUE(attr(sigma_hat, "po"))
-  ) {
-    rust_result <- try(lav_native_lav_model_objective_ml(
+                          data_cov = NULL, data_mean = NULL,
+                          data_cov_log_det = NULL,
+                          meanstructure = FALSE) {
+  # FIXME: WHAT IS THE BEST THING TO DO HERE??
+  # CURRENTLY: return Inf  (at least for nlminb, this works well)
+  if (!attr(sigma_hat, "po")) {
+    return(Inf)
+  }
+
+  if (isTRUE(getOption("lavaan.rust.experimental.model_objective_ml", FALSE))) {
+    if (!lav_native_backend_available()) {
+      lav_msg_stop("Rust backend is required for the experimental ML model objective")
+    }
+    return(lav_native_lav_model_objective_ml(
       sigma_hat = sigma_hat,
       mu_hat = mu_hat,
       data_cov = data_cov,
       data_mean = data_mean,
       data_cov_log_det = data_cov_log_det,
       meanstructure = meanstructure
-    ), silent = TRUE)
-    if (!inherits(rust_result, "try-error")) {
-      return(rust_result)
-    }
-  }
-
-  # FIXME: WHAT IS THE BEST THING TO DO HERE??
-  # CURRENTLY: return Inf  (at least for nlminb, this works well)
-  if (!attr(sigma_hat, "po")) {
-    return(Inf)
+    ))
   }
 
 
