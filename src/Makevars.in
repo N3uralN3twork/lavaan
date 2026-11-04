@@ -1,0 +1,18 @@
+TARGET_DIR = @TARGET_DIR@
+LIBDIR = $(TARGET_DIR)/@LIBDIR@
+PKG_LIBS = -L"$(LIBDIR)" -llavaan
+
+all: $(SHLIB)
+
+.PHONY: rust
+$(SHLIB): rust
+
+rust:
+	if [ -f rust/vendor.tar.xz ] && [ ! -d vendor ]; then tar xf rust/vendor.tar.xz; fi
+	if [ -d vendor ]; then mkdir -p .cargo && cp rust/vendor-config.toml .cargo/config.toml; fi
+	@PANIC_EXPORTS@RUSTFLAGS="$(RUSTFLAGS) --print=native-static-libs" cargo build @CRAN_FLAGS@ --lib @PROFILE@ --manifest-path=rust/Cargo.toml --target-dir="$(TARGET_DIR)" @TARGET@
+
+# Wrappers are checked in; installation only compiles and links the backend.
+# Keep the external Cargo cache when R runs INSTALL --preclean.
+clean:
+	rm -f $(SHLIB) $(OBJECTS)

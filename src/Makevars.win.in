@@ -1,0 +1,23 @@
+TARGET = $(subst 64,x86_64,$(subst 32,i686,$(WIN)))-pc-windows-gnu
+TARGET_DIR = @TARGET_DIR@
+LIBDIR = $(TARGET_DIR)/$(TARGET)/@LIBDIR@
+PKG_LIBS = -L"$(LIBDIR)" -llavaan -lws2_32 -ladvapi32 -luserenv -lbcrypt -lntdll
+
+all: $(SHLIB)
+
+.PHONY: rust
+$(SHLIB): rust
+
+rust:
+	# Match rextendr's workaround for Rust's libgcc_eh dependency on Windows.
+	mkdir -p "$(TARGET_DIR)/libgcc_mock"
+	touch "$(TARGET_DIR)/libgcc_mock/libgcc_eh.a"
+	if [ -f rust/vendor.tar.xz ] && [ ! -d vendor ]; then tar xf rust/vendor.tar.xz; fi
+	if [ -d vendor ]; then mkdir -p .cargo && cp rust/vendor-config.toml .cargo/config.toml; fi
+	LIBRARY_PATH="$(LIBRARY_PATH);$(TARGET_DIR)/libgcc_mock" \
+	RUSTFLAGS="$(RUSTFLAGS) --print=native-static-libs" cargo build @CRAN_FLAGS@ --target=$(TARGET) --lib @PROFILE@ --manifest-path=rust/Cargo.toml --target-dir="$(TARGET_DIR)"
+
+# Wrappers are checked in; installation only compiles and links the backend.
+# Keep the external Cargo cache when R runs INSTALL --preclean.
+clean:
+	rm -f $(SHLIB) $(OBJECTS)
