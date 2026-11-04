@@ -68,4 +68,5 @@ LazyData: yes
 ByteCompile: true
 URL: https://lavaan.ugent.be
 Config/rextendr/version: 0.5.0
+Config/build/extra-sources: rust/lavaan-kernels
 SystemRequirements: Cargo (Rust's package manager), rustc >= 1.71.0, xz
