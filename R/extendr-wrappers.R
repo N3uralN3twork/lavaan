@@ -9,50 +9,57 @@ NULL
 #' @export
 lav_rust_backend_ping <- function() .Call(wrap__lav_rust_backend_ping)
 
-#' Build an immutable continuous-LISREL model plan. The returned external
-#' pointer owns copied numeric state and is finalized by R when its optimizer
-#' cache is released.
+#' Construct immutable sample statistics and free-element maps once per fit.
 #' @export
 lav_rust_lisrel_ml_plan_new <- function(sample_cov, sample_mean, nvar, nfac, beta_present, nobs, ntotal, free_group, free_kind, free_element, free_parameter, nfree, meanstructure) .Call(wrap__lav_rust_lisrel_ml_plan_new, sample_cov, sample_mean, nvar, nfac, beta_present, nobs, ntotal, free_group, free_kind, free_element, free_parameter, nfree, meanstructure)
 
-#' Standard ML numerical objective used by `lav_model_objective.R`.
-#' @export
-lav_rust_model_objective_ml <- function(`_sigma_hat`, sigma_hat_inv, data_cov, mu_hat, data_mean, sigma_hat_log_det, data_cov_log_det, meanstructure) .Call(wrap__lav_rust_model_objective_ml, `_sigma_hat`, sigma_hat_inv, data_cov, mu_hat, data_mean, sigma_hat_log_det, data_cov_log_det, meanstructure)
+#' Attach owned matrix templates once, before optimizer evaluations begin.
+lav_rust_lisrel_ml_plan_set_templates <- function(plan, lambda, theta, psi, beta, nu, alpha) .Call(wrap__lav_rust_lisrel_ml_plan_set_templates, plan, lambda, theta, psi, beta, nu, alpha)
 
-#' Combined standard-ML objective and delta-method gradient for all groups.
-#'
-#' `R/lav_model_objective_gradient.R` prepares the packed numerical state and
-#' owns the model/S4 orchestration. The returned vector is
-#' `[objective, group_objectives..., gradient...]`.
-#' @export
-lav_rust_model_objective_gradient_ml <- function(sigma, sigma_inv, data_cov, mu_hat, data_mean, sigma_log_det, data_cov_log_det, delta, nvar, delta_rows, delta_cols, group_weights, meanstructure) .Call(wrap__lav_rust_model_objective_gradient_ml, sigma, sigma_inv, data_cov, mu_hat, data_mean, sigma_log_det, data_cov_log_det, delta, nvar, delta_rows, delta_cols, group_weights, meanstructure)
+#' Evaluate from the free-parameter vector using model matrices owned by Rust.
+lav_rust_model_objective_gradient_lisrel_ml_parameters <- function(plan, parameters) .Call(wrap__lav_rust_model_objective_gradient_lisrel_ml_parameters, plan, parameters)
 
-#' Fully numerical continuous-LISREL ML objective and gradient.
-#'
-#' R only marshals model matrices, free-element maps, and sample moments. Rust
-#' computes implied moments, Cholesky metadata, objective, and gradient.
+#' Fully numerical continuous LISREL ML objective and gradient.
 #' @export
 lav_rust_model_objective_gradient_lisrel_ml <- function(lambda, theta, psi, beta, nu, alpha, sample_cov, sample_mean, nvar, nfac, beta_present, nobs, ntotal, free_group, free_kind, free_element, free_parameter, nfree, meanstructure) .Call(wrap__lav_rust_model_objective_gradient_lisrel_ml, lambda, theta, psi, beta, nu, alpha, sample_cov, sample_mean, nvar, nfac, beta_present, nobs, ntotal, free_group, free_kind, free_element, free_parameter, nfree, meanstructure)
 
-#' Evaluate the fully numerical continuous-LISREL ML objective and gradient
-#' using immutable state owned by `LisrelMlPlan`.
+#' Evaluate packed model matrices using a persistent native plan.
 #' @export
 lav_rust_model_objective_gradient_lisrel_ml_with_plan <- function(plan, lambda, theta, psi, beta, nu, alpha) .Call(wrap__lav_rust_model_objective_gradient_lisrel_ml_with_plan, plan, lambda, theta, psi, beta, nu, alpha)
 
-#' Opt-in timing for the fully numerical continuous-LISREL ML objective and
-#' gradient. The first result values are identical to
-#' `lav_rust_model_objective_gradient_lisrel_ml`; the final six values are
-#' bridge conversion, plan/free-map, implied-moment, factorization/objective,
-#' direct-score, and result-buffer milliseconds respectively.
+#' Same result plus six diagnostic stage timings (milliseconds).
 #' @export
 lav_rust_model_objective_gradient_lisrel_ml_diagnostics <- function(lambda, theta, psi, beta, nu, alpha, sample_cov, sample_mean, nvar, nfac, beta_present, nobs, ntotal, free_group, free_kind, free_element, free_parameter, nfree, meanstructure) .Call(wrap__lav_rust_model_objective_gradient_lisrel_ml_diagnostics, lambda, theta, psi, beta, nu, alpha, sample_cov, sample_mean, nvar, nfac, beta_present, nobs, ntotal, free_group, free_kind, free_element, free_parameter, nfree, meanstructure)
 
-#' Flattened diagonal FIML starting moments for baseline independence models.
+#' Standard ML discrepancy (before lavaan's one-half scaling).
 #' @export
+lav_rust_model_objective_ml <- function(sigma_hat, sigma_hat_inv, data_cov, mu_hat, data_mean, sigma_hat_log_det, data_cov_log_det, meanstructure) .Call(wrap__lav_rust_model_objective_ml, sigma_hat, sigma_hat_inv, data_cov, mu_hat, data_mean, sigma_hat_log_det, data_cov_log_det, meanstructure)
+
+#' Combined objective and delta-method gradient from packed implied moments.
+lav_rust_model_objective_gradient_ml <- function(sigma, sigma_inv, data_cov, mu_hat, data_mean, sigma_log_det, data_cov_log_det, delta, nvar, delta_rows, delta_cols, group_weights, meanstructure) .Call(wrap__lav_rust_model_objective_gradient_ml, sigma, sigma_inv, data_cov, mu_hat, data_mean, sigma_log_det, data_cov_log_det, delta, nvar, delta_rows, delta_cols, group_weights, meanstructure)
+
 lav_rust_baseline_fiml_moments <- function(pattern_lengths, observed_indices, frequencies, means, sy_diagonals, nvar) .Call(wrap__lav_rust_baseline_fiml_moments, pattern_lengths, observed_indices, frequencies, means, sy_diagonals, nvar)
 
-#' Diagonal FIML normal log likelihood for baseline independence models.
-#' @export
 lav_rust_baseline_fiml_loglik <- function(pattern_lengths, observed_indices, frequencies, means, sy_diagonals, mean, var) .Call(wrap__lav_rust_baseline_fiml_loglik, pattern_lengths, observed_indices, frequencies, means, sy_diagonals, mean, var)
+
+lav_rust_model_objective_ml_res <- function(sigma_hat, sigma_hat_inv, res_cov, res_int, res_slopes, mu_hat, pi0, cov_x, mean_x, sigma_hat_log_det, res_cov_log_det) .Call(wrap__lav_rust_model_objective_ml_res, sigma_hat, sigma_hat_inv, res_cov, res_int, res_slopes, mu_hat, pi0, cov_x, mean_x, sigma_hat_log_det, res_cov_log_det)
+
+lav_rust_model_objective_gls <- function(sigma_hat, data_cov, data_cov_inv, mu_hat, data_mean, meanstructure, correlation) .Call(wrap__lav_rust_model_objective_gls, sigma_hat, data_cov, data_cov_inv, mu_hat, data_mean, meanstructure, correlation)
+
+lav_rust_model_objective_wls <- function(wls_est, wls_obs, wls_v) .Call(wrap__lav_rust_model_objective_wls, wls_est, wls_obs, wls_v)
+
+lav_rust_model_objective_dwls <- function(wls_est, wls_obs, wls_vd) .Call(wrap__lav_rust_model_objective_dwls, wls_est, wls_obs, wls_vd)
+
+lav_rust_model_estimate_pack <- function(values, k0, k) .Call(wrap__lav_rust_model_estimate_pack, values, k0, k)
+
+lav_rust_model_estimate_unpack_unscale <- function(values, k0, k, parscale) .Call(wrap__lav_rust_model_estimate_unpack_unscale, values, k0, k, parscale)
+
+lav_rust_model_estimate_gradient_postprocess <- function(dx, parscale, k, total_nobs, pml) .Call(wrap__lav_rust_model_estimate_gradient_postprocess, dx, parscale, k, total_nobs, pml)
+
+lav_rust_model_vcov_delta_a_delta <- function(delta, a1) .Call(wrap__lav_rust_model_vcov_delta_a_delta, delta, a1)
+
+lav_rust_model_vcov_sandwich <- function(left, middle) .Call(wrap__lav_rust_model_vcov_sandwich, left, middle)
+
+lav_rust_model_vcov_jacobian_vcov_jacobian_t <- function(jac, vcov) .Call(wrap__lav_rust_model_vcov_jacobian_vcov_jacobian_t, jac, vcov)
 
 # nolint end

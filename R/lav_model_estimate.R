@@ -372,7 +372,9 @@ lav_model_estimate <- function(lavmodel = NULL,
 
     estimate_cache$packed_x <- x
     estimate_cache$model_x <- model_x
-    estimate_cache$glist <- lav_model_x2glist(lavmodel, x = model_x)
+    estimate_cache$glist <- if (use_rust_parameter_vector) NULL else {
+      lav_model_x2glist(lavmodel, x = model_x)
+    }
     estimate_cache$implied <- NULL
     estimate_cache$implied_spec <- NULL
     estimate_cache$objective_gradient <- NULL
@@ -391,12 +393,13 @@ lav_model_estimate <- function(lavmodel = NULL,
     !lavmodel@group.w.free &&
     length(lavsamplestats@cov) > 0L
   use_rust_ml_objective_gradient_full <- isTRUE(getOption(
-    "lavaan.rust.experimental.objective_gradient_full", FALSE
+    "lavaan.rust.experimental.objective_gradient_full", TRUE
   )) && share_implied &&
     !lavsamplestats@missing.flag &&
     !lavmodel@conditional.x &&
     !lavmodel@group.w.free &&
-    length(lavsamplestats@cov) > 0L
+    length(lavsamplestats@cov) > 0L &&
+    lav_rust_kernel_enabled("model_objective")
   use_rust_ml_objective_gradient <- isTRUE(getOption(
     "lavaan.rust.experimental.objective_gradient", FALSE
   )) && share_implied &&
@@ -404,17 +407,29 @@ lav_model_estimate <- function(lavmodel = NULL,
     !lavmodel@conditional.x &&
     !lavmodel@group.w.free &&
     length(lavsamplestats@cov) > 0L
+  use_rust_parameter_vector <- use_rust_ml_objective_gradient_full &&
+    isTRUE(getOption("lavaan.rust.parameter_vector", TRUE)) &&
+    !identical(Sys.getenv("LAVAAN_PARAMETER_VECTOR", unset = "parameters"), "matrix")
   if (use_rust_ml_objective_gradient_full) {
     estimate_cache$lisrel_objective_gradient_plan <-
       lav_model_objective_gradient_lisrel_plan(
-        lavmodel = lavmodel, lavsamplestats = lavsamplestats, lavdata = lavdata
+        lavmodel = lavmodel, lavsamplestats = lavsamplestats, lavdata = lavdata,
+        parameter_vector = use_rust_parameter_vector
       )
+    use_rust_ml_objective_gradient_full <-
+      !is.null(estimate_cache$lisrel_objective_gradient_plan)
   }
+  use_rust_parameter_vector <- use_rust_parameter_vector &&
+    !is.null(estimate_cache$lisrel_objective_gradient_plan)
 
   objective_gradient_state <- function(state) {
     if (!use_rust_ml_objective_gradient_full && !use_rust_ml_objective_gradient) return(NULL)
     if (is.null(state$objective_gradient)) {
-      state$objective_gradient <- if (use_rust_ml_objective_gradient_full) {
+      state$objective_gradient <- if (use_rust_parameter_vector) {
+        lav_model_objective_gradient_lisrel_parameters(
+          state$lisrel_objective_gradient_plan, state$model_x
+        )
+      } else if (use_rust_ml_objective_gradient_full) {
         lav_model_objective_gradient_lisrel_ml(
           lavmodel = lavmodel, glist = state$glist,
           lavsamplestats = lavsamplestats, lavdata = lavdata,

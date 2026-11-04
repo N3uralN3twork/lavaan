@@ -9,6 +9,7 @@ lav_model_objective_gradient_lisrel_wire <- function(lavmodel, glist,
   if (is.null(glist)) glist <- lavmodel@GLIST
   if (lavmodel@estimator != "ML" || lavdata@nlevels != 1L ||
       lavmodel@representation != "LISREL" || lavmodel@categorical ||
+      lavmodel@correlation ||
       lavmodel@conditional.x || lavmodel@composites ||
       lavmodel@group.w.free || lavmodel@ceq.simple.only ||
       lavmodel@eq.constraints || lavsamplestats@missing.flag ||
@@ -105,11 +106,12 @@ lav_model_objective_gradient_lisrel_wire <- function(lavmodel, glist,
   )
 }
 
-# Build once per optimizer run. The external pointer owns only copied immutable
-# numerical state, so it cannot retain R-managed memory after a native call.
+# Build once per optimizer run. The external pointer owns its numerical state,
+# including reusable matrix buffers; it retains no R-managed memory.
 lav_model_objective_gradient_lisrel_plan <- function(lavmodel,
                                                       lavsamplestats,
-                                                      lavdata) {
+                                                      lavdata,
+                                                      parameter_vector = FALSE) {
   wire <- lav_model_objective_gradient_lisrel_wire(
     lavmodel, lavmodel@GLIST, lavsamplestats, lavdata
   )
@@ -122,8 +124,27 @@ lav_model_objective_gradient_lisrel_plan <- function(lavmodel,
     free_parameter = wire$free_parameter, nfree = wire$nfree,
     meanstructure = wire$meanstructure
   )
+  if (parameter_vector) {
+    lav_rust_lisrel_ml_plan_set_templates(
+      wire$native, wire$lambda, wire$theta, wire$psi,
+      wire$beta, wire$nu, wire$alpha
+    )
+  }
+  wire$parameter_vector <- parameter_vector
+  wire$ngroups <- length(wire$nvar)
   wire[c("lambda", "theta", "psi", "beta", "nu", "alpha")] <- NULL
   structure(wire, class = "lavaan_lisrel_ml_plan")
+}
+
+# Optimizer-only entry point: the plan owns the model structure, fixed matrix
+# values, sample statistics, and free-element maps. No S4 or matrix packing is
+# performed on this path. A new optimizer run always creates a new plan.
+lav_model_objective_gradient_lisrel_parameters <- function(plan, x) {
+  if (!inherits(plan, "lavaan_lisrel_ml_plan") || !isTRUE(plan$parameter_vector)) {
+    stop("lavaan LISREL parameter evaluation requires a parameter-vector plan", call. = FALSE)
+  }
+  result <- lav_rust_model_objective_gradient_lisrel_ml_parameters(plan$native, as.numeric(x))
+  lav_model_objective_gradient_lisrel_result(result, plan$ngroups, plan$nfree)
 }
 
 lav_model_objective_gradient_lisrel_result <- function(result, ngroups, nfree) {

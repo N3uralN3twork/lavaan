@@ -72,6 +72,18 @@ lav_rust_kernel_enabled <- function(kernel) {
     "matrix", "model_gradient", "model_vcov", "model_estimate",
     "model_objective"
   ))
+  # Only advertise the kernels registered by this build. Deleted native sources
+  # may be restored independently; unsupported helpers retain their R paths.
+  symbol <- switch(kernel,
+    matrix = "wrap__lav_rust_matrix_vec",
+    model_gradient = "wrap__lav_rust_model_gradient_omega_ml",
+    model_vcov = "wrap__lav_rust_model_vcov_delta_a_delta",
+    model_estimate = "wrap__lav_rust_model_estimate_pack",
+    model_objective = "wrap__lav_rust_model_objective_ml"
+  )
+  if (!exists(symbol, envir = asNamespace("lavaan"), inherits = FALSE)) {
+    return(FALSE)
+  }
   env_kernels <- Sys.getenv("LAVAAN_RUST_KERNELS", unset = "")
   opt_kernels <- getOption("lavaan.rust.kernels", default = NULL)
 
